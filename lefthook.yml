@@ -1,0 +1,43 @@
+commit-msg:
+  commands:
+    conventional-commit:
+      run: |
+        msg=$(head -1 {1})
+        if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?(!)?: .{1,}$'; then
+          echo ""
+          echo "❌ Invalid commit message format:"
+          echo "   \"$msg\""
+          echo ""
+          echo "Expected: <type>(<scope>): <subject>"
+          echo ""
+          echo "Types: feat fix docs style refactor perf test build ci chore revert"
+          echo "Examples:"
+          echo "  feat: add request body capture for replay"
+          echo "  fix(proxy): handle client disconnect cleanup"
+          echo "  docs: translate README to English"
+          echo "  feat!: drop Node 18 support"
+          echo ""
+          exit 1
+        fi
+        if [ ${#msg} -gt 72 ]; then
+          echo ""
+          echo "❌ Commit subject too long (${#msg} chars, max 72):"
+          echo "   \"$msg\""
+          echo ""
+          exit 1
+        fi
+
+pre-commit:
+  parallel: true
+  commands:
+    typecheck:
+      run: pnpm typecheck
+    lint:
+      run: pnpm lint
+    format:
+      run: pnpm format:check
+
+pre-push:
+  commands:
+    test:
+      run: pnpm test

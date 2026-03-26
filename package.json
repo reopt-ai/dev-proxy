@@ -1,0 +1,68 @@
+{
+  "name": "dev-proxy",
+  "version": "1.0.0",
+  "description": "Subdomain-based reverse proxy and HTTP/WS traffic inspector TUI",
+  "license": "MIT",
+  "author": "reopt.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reopt-ai/dev-proxy.git"
+  },
+  "keywords": [
+    "proxy",
+    "reverse-proxy",
+    "dev-tools",
+    "http-inspector",
+    "websocket",
+    "tui",
+    "terminal",
+    "ink",
+    "subdomain"
+  ],
+  "type": "module",
+  "bin": {
+    "dev-proxy": "bin/dev-proxy.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "LICENSE",
+    "README.md",
+    "README_KO.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "prepublishOnly": "pnpm run build",
+    "proxy": "pnpm run build && node dist/bootstrap.js",
+    "proxy:src": "node --import tsx/esm src/bootstrap.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
+  },
+  "dependencies": {
+    "ink": "^6.8.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.0.0",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.57.2",
+    "vitest": "^3.2.4"
+  }
+}
