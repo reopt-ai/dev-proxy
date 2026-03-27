@@ -137,6 +137,37 @@ function createRequestHandler(
     const id = nextId();
     const host = clientReq.headers.host ?? "";
 
+    // No target resolved — either unregistered worktree or unknown subdomain
+    if (!target) {
+      const errorMsg = worktree ? "worktree not registered" : "no route configured";
+      const event: ProxyRequestEvent = {
+        id,
+        type: "http",
+        protocol: proto,
+        timestamp: Date.now(),
+        method: clientReq.method ?? "GET",
+        url: clientReq.url ?? "/",
+        host,
+        target: "",
+        worktree: worktree ?? undefined,
+        error: errorMsg,
+        cookies: {},
+        query: {},
+        requestHeaders: {},
+        responseHeaders: {},
+      };
+      emitter.emit("request", event);
+      emitter.emit("request:error", event);
+      if (worktree) {
+        clientRes.writeHead(502, { "Content-Type": "text/html; charset=utf-8" });
+        clientRes.end(worktreeErrorPage(worktree, new URL("http://unknown"), errorMsg));
+      } else {
+        clientRes.writeHead(502, { "Content-Type": "text/plain" });
+        clientRes.end(`Dev proxy: ${errorMsg} for ${host}`);
+      }
+      return;
+    }
+
     const collectDetail = isDetailActive();
     const event: ProxyRequestEvent = {
       id,
@@ -225,9 +256,15 @@ function createUpgradeHandler(
 ): (clientReq: http.IncomingMessage, clientSocket: net.Socket, head: Buffer) => void {
   return (clientReq, clientSocket, head) => {
     const { url: target, worktree } = getTarget(clientReq.headers.host ?? "");
+    const host = clientReq.headers.host ?? "";
+
+    // No target resolved — close socket immediately
+    if (!target) {
+      clientSocket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      return;
+    }
     const id = nextId();
     const wsStart = performance.now();
-    const host = clientReq.headers.host ?? "";
 
     const wsEvent: ProxyWsEvent = {
       id,

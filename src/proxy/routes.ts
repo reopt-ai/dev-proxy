@@ -25,31 +25,38 @@ function parseTarget(label: string, raw: string): URL | null {
   }
 }
 
-// ── Build from config ────────────────────────────────────────
+// ── Build from project configs ──────────────────────────────
 
 const parsedRoutes = new Map<string, URL>();
-for (const [subdomain, target] of Object.entries(config.routes)) {
-  const parsed = parseTarget(`routes.${subdomain}`, target);
-  if (parsed) parsedRoutes.set(subdomain, parsed);
-}
+let wildcardTarget: URL | null = null;
 
-const defaultTarget =
-  parseTarget("defaultTarget", config.defaultTarget) ?? new URL("http://localhost:3001");
+for (const project of config.projects) {
+  for (const [subdomain, target] of Object.entries(project.routes)) {
+    if (subdomain === "*") {
+      // First wildcard wins
+      wildcardTarget ??= parseTarget(`${project.path} routes.*`, target);
+      continue;
+    }
+    // First registration wins — later projects don't override
+    if (!parsedRoutes.has(subdomain)) {
+      const parsed = parseTarget(`${project.path} routes.${subdomain}`, target);
+      if (parsed) parsedRoutes.set(subdomain, parsed);
+    }
+  }
+}
 
 export const DOMAIN = config.domain;
 export const ROUTES: Record<string, string> = Object.fromEntries(
   [...parsedRoutes.entries()].map(([sub, url]) => [sub, formatTarget(url)]),
 );
-export const DEFAULT_TARGET = formatTarget(defaultTarget);
+export const DEFAULT_TARGET = wildcardTarget ? formatTarget(wildcardTarget) : null;
 export const PROXY_PORT = config.port;
 export const HTTPS_PORT = config.httpsPort;
 export const CERT_PATH = config.certPath;
 export const KEY_PATH = config.keyPath;
 
-const DEFAULT_PARSED = defaultTarget;
-
 export interface TargetResult {
-  url: URL;
+  url: URL | null;
   worktree: string | null;
 }
 
@@ -72,7 +79,7 @@ export function getTarget(host: string): TargetResult {
   const { app, worktree } = parseHost(host);
   if (worktree) {
     const target = getWorktreeTarget(worktree);
-    if (target) return { url: target, worktree };
+    return { url: target, worktree };
   }
-  return { url: parsedRoutes.get(app) ?? DEFAULT_PARSED, worktree: null };
+  return { url: parsedRoutes.get(app) ?? wildcardTarget, worktree: null };
 }

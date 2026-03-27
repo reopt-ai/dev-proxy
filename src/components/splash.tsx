@@ -47,11 +47,13 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
               <Text color={palette.dim}>{target}</Text>
             </Box>
           ))}
-          <Box gap={1}>
-            <Text color={palette.muted}>{`*.${DOMAIN}`.padEnd(22)}</Text>
-            <Text color={palette.subtle}>{"\u279C"}</Text>
-            <Text color={palette.dim}>{DEFAULT_TARGET}</Text>
-          </Box>
+          {DEFAULT_TARGET && (
+            <Box gap={1}>
+              <Text color={palette.muted}>{`*.${DOMAIN}`.padEnd(22)}</Text>
+              <Text color={palette.subtle}>{"\u279C"}</Text>
+              <Text color={palette.dim}>{DEFAULT_TARGET}</Text>
+            </Box>
+          )}
         </Box>
 
         {/* Worktrees (exclude main — already shown in routes) */}

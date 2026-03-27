@@ -5,86 +5,61 @@ import { homedir } from "node:os";
 // ── Paths ────────────────────────────────────────────────────
 export const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
 export const GLOBAL_CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_NAME = ".proxy.json";
+const PROJECT_CONFIG_NAME = ".dev-proxy.json";
 
 // ── Types ────────────────────────────────────────────────────
-interface RawConfig {
+
+/** Raw shape of ~/.dev-proxy/config.json */
+interface RawGlobalConfig {
   domain?: string;
   port?: number;
   httpsPort?: number;
-  defaultTarget?: string;
   certPath?: string;
   keyPath?: string;
+  projects?: string[];
+}
+
+/** Raw shape of <project>/.dev-proxy.json */
+interface RawProjectConfig {
   routes?: Record<string, string>;
-  worktreeRegistry?: string;
+  worktrees?: Record<string, { port: number }>;
+}
+
+export interface ProjectConfig {
+  path: string;
+  configPath: string;
+  routes: Record<string, string>;
+  worktrees: Record<string, { port: number }>;
 }
 
 export interface ResolvedConfig {
   domain: string;
   port: number;
   httpsPort: number;
-  defaultTarget: string;
   certPath?: string;
   keyPath?: string;
-  routes: Record<string, string>;
-  worktreeRegistry?: string;
-  projectConfigPath: string | null;
+  projects: ProjectConfig[];
 }
 
-// ── Defaults (generic — no project-specific values) ──────────
-const DEFAULTS: ResolvedConfig = {
-  domain: "localhost",
-  port: 3000,
-  httpsPort: 3443,
-  defaultTarget: "http://localhost:3001",
-  routes: {},
-  projectConfigPath: null,
-};
-
 // ── Loaders ──────────────────────────────────────────────────
-function loadJsonFile(path: string): RawConfig {
+
+function loadJson(path: string): unknown {
   try {
     if (existsSync(path)) {
-      return JSON.parse(readFileSync(path, "utf-8")) as RawConfig;
+      return JSON.parse(readFileSync(path, "utf-8")) as unknown;
     }
   } catch (err) {
     console.error(`[dev-proxy] Failed to parse ${path}: ${(err as Error).message}`);
   }
-  return {};
+  return null;
 }
 
-function findProjectConfig(fromDir: string): string | null {
-  let current = fromDir;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite loop with returns
-  while (true) {
-    const candidate = resolve(current, PROJECT_CONFIG_NAME);
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
-
-function loadProjectConfig(): {
-  config: RawConfig;
-  configPath: string | null;
-} {
-  const starts = [process.cwd(), resolve(import.meta.dirname, "..", "..")];
-  for (const start of starts) {
-    const configPath = findProjectConfig(start);
-    if (!configPath) continue;
-    return { config: loadJsonFile(configPath), configPath };
-  }
-  return { config: {}, configPath: null };
-}
-
-// ── Merge & Resolve ──────────────────────────────────────────
 function resolveFilePath(
   rawPath: string | undefined,
-  basePath: string | null,
+  basePath: string,
 ): string | undefined {
   if (!rawPath) return undefined;
-  if (!basePath || isAbsolute(rawPath)) return rawPath;
+  if (isAbsolute(rawPath)) return rawPath;
   return resolve(dirname(basePath), rawPath);
 }
 
@@ -97,50 +72,46 @@ function parsePort(label: string, raw: number | undefined, fallback: number): nu
   return fallback;
 }
 
-/**
- * Config loading priority: defaults → ~/.dev-proxy/config.json → .proxy.json
- */
-function loadConfig(): ResolvedConfig {
-  const global = loadJsonFile(GLOBAL_CONFIG_PATH);
-  const { config: project, configPath: projectConfigPath } = loadProjectConfig();
-
-  const domain = project.domain ?? global.domain ?? DEFAULTS.domain;
-  const port = parsePort("port", project.port ?? global.port, DEFAULTS.port);
-  const httpsPort = parsePort(
-    "httpsPort",
-    project.httpsPort ?? global.httpsPort,
-    DEFAULTS.httpsPort,
-  );
-  const defaultTarget =
-    project.defaultTarget ?? global.defaultTarget ?? DEFAULTS.defaultTarget;
-
-  const routes: Record<string, string> = {
-    ...(global.routes ?? {}),
-    ...(project.routes ?? {}),
-  };
-
-  const certPath =
-    resolveFilePath(project.certPath, projectConfigPath) ??
-    resolveFilePath(global.certPath, GLOBAL_CONFIG_PATH);
-  const keyPath =
-    resolveFilePath(project.keyPath, projectConfigPath) ??
-    resolveFilePath(global.keyPath, GLOBAL_CONFIG_PATH);
-
-  const worktreeRegistry =
-    resolveFilePath(project.worktreeRegistry, projectConfigPath) ??
-    resolveFilePath(global.worktreeRegistry, GLOBAL_CONFIG_PATH);
-
+function loadProjectConfig(projectDir: string): ProjectConfig | null {
+  const configPath = resolve(projectDir, PROJECT_CONFIG_NAME);
+  if (!existsSync(configPath)) return null;
+  const raw = loadJson(configPath) as RawProjectConfig | null;
+  if (!raw) return null;
   return {
-    domain,
-    port,
-    httpsPort,
-    defaultTarget,
-    certPath,
-    keyPath,
-    routes,
-    worktreeRegistry,
-    projectConfigPath,
+    path: projectDir,
+    configPath,
+    routes: raw.routes ?? {},
+    worktrees: raw.worktrees ?? {},
   };
+}
+
+// ── Main loader ──────────────────────────────────────────────
+
+function loadConfig(): ResolvedConfig {
+  const global = (loadJson(GLOBAL_CONFIG_PATH) as RawGlobalConfig | null) ?? {};
+
+  const domain = global.domain ?? "localhost";
+  const port = parsePort("port", global.port, 3000);
+  const httpsPort = parsePort("httpsPort", global.httpsPort, 3443);
+  const certPath = resolveFilePath(global.certPath, GLOBAL_CONFIG_PATH);
+  const keyPath = resolveFilePath(global.keyPath, GLOBAL_CONFIG_PATH);
+
+  const projects: ProjectConfig[] = [];
+  if (global.projects) {
+    for (const projectDir of global.projects) {
+      const resolved = isAbsolute(projectDir)
+        ? projectDir
+        : resolve(CONFIG_DIR, projectDir);
+      const project = loadProjectConfig(resolved);
+      if (project) {
+        projects.push(project);
+      } else {
+        console.error(`[dev-proxy] Project ${resolved}: no ${PROJECT_CONFIG_NAME} found`);
+      }
+    }
+  }
+
+  return { domain, port, httpsPort, certPath, keyPath, projects };
 }
 
 export const config = loadConfig();

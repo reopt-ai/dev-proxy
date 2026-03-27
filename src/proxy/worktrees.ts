@@ -1,22 +1,18 @@
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname } from "node:path";
 import { useSyncExternalStore } from "react";
-import { config } from "./config.js";
+import { config, type ProjectConfig } from "./config.js";
 
 // ── Types ────────────────────────────────────────────────────
 interface WorktreeEntry {
   port: number;
-}
-interface WorktreeRegistry {
-  worktrees: Record<string, WorktreeEntry>;
-  nextPort: number;
 }
 
 export type { WorktreeEntry };
 
 // ── State ────────────────────────────────────────────────────
 let worktreeMap = new Map<string, WorktreeEntry>();
-let watcher: FSWatcher | null = null;
+const watchers: FSWatcher[] = [];
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
@@ -24,74 +20,57 @@ function notify() {
   for (const l of listeners) l();
 }
 
-// ── Registry path resolution ─────────────────────────────────
-const REGISTRY_NAME = ".worktrees.json";
-
-function findRegistryPath(): string | null {
-  // 1. Explicit config
-  if (config.worktreeRegistry) {
-    return existsSync(config.worktreeRegistry) ? config.worktreeRegistry : null;
-  }
-  // 2. Search upward from cwd
-  let current = process.cwd();
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional upward traversal
-  while (true) {
-    const candidate = resolve(current, REGISTRY_NAME);
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
-
-const REGISTRY_PATH = findRegistryPath();
-
 // ── Core API ─────────────────────────────────────────────────
 
 function readRegistry(): void {
   const next = new Map<string, WorktreeEntry>();
-  if (!REGISTRY_PATH) {
-    worktreeMap = next;
-    notify();
-    return;
-  }
-  try {
-    const raw = readFileSync(REGISTRY_PATH, "utf-8");
-    const data = JSON.parse(raw) as WorktreeRegistry;
-    for (const [branch, entry] of Object.entries(data.worktrees)) {
-      if (typeof entry.port === "number") {
+
+  for (const project of config.projects) {
+    // Re-read the project config to pick up worktree changes
+    const worktrees = readProjectWorktrees(project);
+    for (const [branch, entry] of Object.entries(worktrees)) {
+      if (typeof entry.port === "number" && !next.has(branch)) {
         next.set(branch, entry);
       }
     }
-  } catch {
-    // File missing or invalid — start with empty map (not an error)
   }
+
   worktreeMap = next;
   notify();
+}
+
+function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEntry> {
+  try {
+    if (!existsSync(project.configPath)) return project.worktrees;
+    const raw = readFileSync(project.configPath, "utf-8");
+    const data = JSON.parse(raw) as { worktrees?: Record<string, WorktreeEntry> };
+    return data.worktrees ?? {};
+  } catch {
+    return project.worktrees;
+  }
 }
 
 export function loadRegistry(): void {
   readRegistry();
 
-  if (!REGISTRY_PATH) return;
-
-  // Watch the parent directory for changes to .worktrees.json.
-  // fs.watch on a file can miss events on macOS when the file is
-  // overwritten in place (e.g. writeFileSync or atomic mv).
-  // Watching the directory reliably catches all modifications.
-  try {
-    const dir = dirname(REGISTRY_PATH);
-    const base = basename(REGISTRY_PATH);
-    watcher = watch(dir, (_event, filename) => {
-      if (filename !== base) return;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(readRegistry, 100);
-    });
-    watcher.on("error", () => {
-      /* intentional no-op: watcher errors are non-fatal */
-    });
-  } catch {
-    // Directory doesn't exist — no watcher needed
+  // Watch each project's config file for worktree changes
+  for (const project of config.projects) {
+    if (!existsSync(project.configPath)) continue;
+    try {
+      const dir = dirname(project.configPath);
+      const base = basename(project.configPath);
+      const watcher = watch(dir, (_event, filename) => {
+        if (filename !== base) return;
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(readRegistry, 100);
+      });
+      watcher.on("error", () => {
+        /* intentional no-op: watcher errors are non-fatal */
+      });
+      watchers.push(watcher);
+    } catch {
+      // Directory doesn't exist — no watcher needed
+    }
   }
 }
 
@@ -122,8 +101,8 @@ export function useWorktrees(): Map<string, WorktreeEntry> {
 }
 
 export function stopRegistry(): void {
-  watcher?.close();
-  watcher = null;
+  for (const w of watchers) w.close();
+  watchers.length = 0;
   if (debounceTimer) {
     clearTimeout(debounceTimer);
     debounceTimer = null;

@@ -1,52 +1,5 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseHost, getTarget, ROUTES, DEFAULT_TARGET } from "./routes.js";
-
-const CONFIG_MODULE_URL = new URL("./config.ts", import.meta.url).href;
-const ORIGINAL_CWD = process.cwd();
-
-describe("dev-proxy config", () => {
-  let tempDir = "";
-
-  beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "dev-proxy-config-"));
-  });
-
-  afterEach(() => {
-    process.chdir(ORIGINAL_CWD);
-    if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  it("resolves cert paths relative to the .proxy.json location", async () => {
-    const nestedCwd = join(tempDir, "apps", "dev-proxy");
-    mkdirSync(nestedCwd, { recursive: true });
-
-    writeFileSync(
-      join(tempDir, ".proxy.json"),
-      JSON.stringify({
-        certPath: "certs/dev.example+1.pem",
-        keyPath: "certs/dev.example+1-key.pem",
-      }),
-    );
-
-    process.chdir(nestedCwd);
-
-    const mod = await import(`${CONFIG_MODULE_URL}?t=${Date.now()}`);
-
-    const normalizedTempDir = realpathSync(tempDir);
-
-    expect(mod.config.certPath).toBe(
-      resolve(normalizedTempDir, "certs/dev.example+1.pem"),
-    );
-    expect(mod.config.keyPath).toBe(
-      resolve(normalizedTempDir, "certs/dev.example+1-key.pem"),
-    );
-  });
-});
 
 describe("parseHost", () => {
   it("extracts subdomain from standard host", () => {
@@ -114,19 +67,30 @@ describe("getTarget", () => {
 
     const app = configuredApps[0]!;
     const result = getTarget(`${app}.reopt.de:3000`);
-    expect(result.url.origin).toBe(ROUTES[app]);
+    expect(result.url).not.toBeNull();
+    expect(result.url!.origin).toBe(ROUTES[app]);
     expect(result.worktree).toBeNull();
   });
 
-  it("falls back to default target for unknown subdomain", () => {
+  it("falls back to wildcard target for unknown subdomain", () => {
     const result = getTarget("unknown-xyz.reopt.de:3000");
-    expect(result.url.origin).toBe(new URL(DEFAULT_TARGET).origin);
+    if (DEFAULT_TARGET) {
+      expect(result.url).not.toBeNull();
+      expect(result.url!.origin).toBe(new URL(DEFAULT_TARGET).origin);
+    } else {
+      expect(result.url).toBeNull();
+    }
     expect(result.worktree).toBeNull();
   });
 
-  it("falls back to default target for empty host", () => {
+  it("falls back to wildcard target for empty host", () => {
     const result = getTarget("");
-    expect(result.url.origin).toBe(new URL(DEFAULT_TARGET).origin);
+    if (DEFAULT_TARGET) {
+      expect(result.url).not.toBeNull();
+      expect(result.url!.origin).toBe(new URL(DEFAULT_TARGET).origin);
+    } else {
+      expect(result.url).toBeNull();
+    }
   });
 
   it("empty worktree prefix falls through to normal routing", () => {
@@ -134,5 +98,11 @@ describe("getTarget", () => {
     const result = getTarget("--www.reopt.de:3000");
     // Should not crash, should fall through to route lookup for "www"
     expect(result.worktree).toBeNull();
+  });
+
+  it("returns null url for unregistered worktree", () => {
+    const result = getTarget("nonexistent--studio.reopt.de:3000");
+    expect(result.worktree).toBe("nonexistent");
+    expect(result.url).toBeNull();
   });
 });
