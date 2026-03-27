@@ -7,6 +7,7 @@ import * as net from "node:net";
 import { Box, Text, render, useApp } from "ink";
 import { config, CONFIG_DIR, GLOBAL_CONFIG_PATH } from "../proxy/config.js";
 import type { ProjectConfig } from "../proxy/config.js";
+import { getEntryPorts, readProjectConfig } from "../cli/config-io.js";
 import { Header, Check, Section } from "../cli/output.js";
 
 interface CheckResult {
@@ -170,29 +171,186 @@ function checkPort(port: number): Promise<CheckResult> {
   });
 }
 
+// ── Worktree checks ──────────────────────────────────────────
+
+function checkWorktreeConfig(projects: ProjectConfig[]): CheckResult[] {
+  const results: CheckResult[] = [];
+
+  for (const project of projects) {
+    const cfg = readProjectConfig(project.path);
+    const worktrees = cfg.worktrees ?? {};
+    const wtConfig = cfg.worktreeConfig;
+    const entries = Object.entries(worktrees);
+
+    if (entries.length === 0) continue;
+
+    // Port conflict check — across all worktrees in this project
+    const portMap = new Map<number, string[]>();
+    for (const [branch, entry] of entries) {
+      for (const p of getEntryPorts(entry)) {
+        const existing = portMap.get(p) ?? [];
+        existing.push(branch);
+        portMap.set(p, existing);
+      }
+    }
+    for (const [port, branches] of portMap) {
+      if (branches.length > 1) {
+        results.push({
+          ok: false,
+          label: `port ${port} used by multiple worktrees: ${branches.join(", ")}`,
+        });
+      }
+    }
+    if ([...portMap.values()].every((b) => b.length === 1)) {
+      results.push({ ok: true, label: `no port conflicts in ${project.path}` });
+    }
+
+    // worktreeConfig validation
+    if (wtConfig) {
+      const [min, max] = wtConfig.portRange;
+      if (min >= max) {
+        results.push({
+          ok: false,
+          label: `invalid portRange [${min}, ${max}] — min must be less than max`,
+        });
+      } else {
+        results.push({ ok: true, label: `portRange [${min}, ${max}] is valid` });
+      }
+
+      // services vs routes cross-check
+      if (wtConfig.services) {
+        const routeKeys = new Set(Object.keys(cfg.routes ?? {}));
+        for (const svc of Object.keys(wtConfig.services)) {
+          if (!routeKeys.has(svc) && svc !== "*") {
+            results.push({
+              ok: false,
+              warn: true,
+              label: `service "${svc}" not found in routes`,
+            });
+          }
+        }
+      }
+    }
+
+    // Per-worktree directory + env file checks
+    if (wtConfig) {
+      for (const [branch, entry] of entries) {
+        const dirPattern = wtConfig.directory.replace("{branch}", branch);
+        const worktreeDir = resolve(project.path, dirPattern);
+
+        // Directory exists
+        if (existsSync(worktreeDir)) {
+          results.push({ ok: true, label: `${branch}: directory exists` });
+
+          // .env.local exists (if services defined)
+          if (wtConfig.services) {
+            const envFile = wtConfig.envFile ?? ".env.local";
+            const envPath = resolve(worktreeDir, envFile);
+            if (existsSync(envPath)) {
+              results.push({ ok: true, label: `${branch}: ${envFile} exists` });
+            } else {
+              results.push({
+                ok: false,
+                warn: true,
+                label: `${branch}: ${envFile} missing — run 'dev-proxy worktree create' to regenerate`,
+              });
+            }
+          }
+        } else {
+          // Skip "main" — it's the project root, not a worktree directory
+          if (branch !== "main") {
+            results.push({
+              ok: false,
+              warn: true,
+              label: `${branch}: directory not found at ${worktreeDir}`,
+            });
+          }
+        }
+
+        // Check if worktree ports are reachable
+        // (done async below)
+        void entry; // used in async check
+      }
+    }
+  }
+
+  return results;
+}
+
+function checkWorktreePort(
+  port: number,
+  branch: string,
+  service?: string,
+): Promise<CheckResult> {
+  const label = service ? `${branch}/${service} :${port}` : `${branch} :${port}`;
+  return new Promise((res) => {
+    const socket = net.createConnection({ port, host: "127.0.0.1" }, () => {
+      socket.destroy();
+      res({ ok: true, label: `${label} is responding` });
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      res({ ok: false, warn: true, label: `${label} is not responding` });
+    });
+    socket.setTimeout(2000, () => {
+      socket.destroy();
+      res({ ok: false, warn: true, label: `${label} timed out` });
+    });
+  });
+}
+
+async function checkWorktreePorts(projects: ProjectConfig[]): Promise<CheckResult[]> {
+  const checks: Promise<CheckResult>[] = [];
+
+  for (const project of projects) {
+    const cfg = readProjectConfig(project.path);
+    const worktrees = cfg.worktrees ?? {};
+
+    for (const [branch, entry] of Object.entries(worktrees)) {
+      if ("ports" in entry) {
+        for (const [svc, port] of Object.entries(entry.ports)) {
+          checks.push(checkWorktreePort(port, branch, svc));
+        }
+      } else {
+        checks.push(checkWorktreePort(entry.port, branch));
+      }
+    }
+  }
+
+  if (checks.length === 0) return [];
+  return Promise.all(checks);
+}
+
 function Doctor() {
   const { exit } = useApp();
   const [asyncChecks, setAsyncChecks] = useState<{
     dns: CheckResult[];
     ports: CheckResult[];
+    worktreePorts: CheckResult[];
   } | null>(null);
 
   const configChecks = checkConfigSection();
   const projectChecks = checkProjectsSection();
   const tlsChecks = checkTlsSection();
+  const worktreeChecks = checkWorktreeConfig(config.projects);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       const subdomains = collectSubdomains(config.projects);
-      const [dnsResults, httpPort, httpsPort] = await Promise.all([
+      const [dnsResults, httpPort, httpsPort, wtPorts] = await Promise.all([
         checkDns(subdomains, config.domain),
         checkPort(config.port),
         checkPort(config.httpsPort),
+        checkWorktreePorts(config.projects),
       ]);
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated in cleanup
       if (!cancelled) {
-        setAsyncChecks({ dns: dnsResults, ports: [httpPort, httpsPort] });
+        setAsyncChecks({
+          dns: dnsResults,
+          ports: [httpPort, httpsPort],
+          worktreePorts: wtPorts,
+        });
       }
     })();
     return () => {
@@ -210,8 +368,10 @@ function Doctor() {
     ...configChecks,
     ...projectChecks,
     ...tlsChecks,
+    ...worktreeChecks,
     ...(asyncChecks?.dns ?? []),
     ...(asyncChecks?.ports ?? []),
+    ...(asyncChecks?.worktreePorts ?? []),
   ];
 
   const passed = allChecks.filter((c) => c.ok).length;
@@ -267,6 +427,21 @@ function Doctor() {
           <Text dimColor>{"    checking..."}</Text>
         )}
       </Section>
+
+      {(worktreeChecks.length > 0 || (asyncChecks?.worktreePorts.length ?? 0) > 0) && (
+        <Section title="Worktrees">
+          {worktreeChecks.map((c) => (
+            <Check key={c.label} ok={c.ok} warn={c.warn} label={c.label} />
+          ))}
+          {asyncChecks
+            ? asyncChecks.worktreePorts.map((c) => (
+                <Check key={c.label} ok={c.ok} warn={c.warn} label={c.label} />
+              ))
+            : worktreeChecks.length > 0 && (
+                <Text dimColor>{"    checking ports..."}</Text>
+              )}
+        </Section>
+      )}
 
       {asyncChecks && (
         <Box marginTop={1}>
