@@ -1,3 +1,3 @@
 #!/usr/bin/env node
 process.env.NODE_ENV = "production";
-await import("../dist/index.js");
+await import("../dist/cli.js");

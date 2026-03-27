@@ -73,6 +73,14 @@ export default tseslint.config(
     },
   },
 
+  // ── CLI tool overrides (commands + cli.ts use console for user output) ──
+  {
+    files: ["src/cli.ts", "src/commands/*.tsx"],
+    rules: {
+      "no-console": "off",
+    },
+  },
+
   // ── Prettier (must be last) ────────────────────────────────
   prettier,
 );
