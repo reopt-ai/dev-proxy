@@ -38,9 +38,21 @@ export function writeGlobalConfig(cfg: RawGlobalConfig): void {
 
 // ── Project config I/O ───────────────────────────────────────
 
+export interface WorktreeHooks {
+  "post-create"?: string;
+  "post-remove"?: string;
+}
+
+export interface WorktreeConfig {
+  portRange: [number, number];
+  directory: string;
+  hooks?: WorktreeHooks;
+}
+
 export interface RawProjectConfig {
   routes?: Record<string, string>;
   worktrees?: Record<string, { port: number }>;
+  worktreeConfig?: WorktreeConfig;
 }
 
 export function readProjectConfig(projectPath: string): RawProjectConfig {
@@ -64,4 +76,16 @@ export function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): 
 
 export function isValidPort(value: number): boolean {
   return Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
+// ── Port allocation ──────────────────────────────────────────
+
+export function allocatePort(
+  portRange: [number, number],
+  usedPorts: Set<number>,
+): number | null {
+  for (let p = portRange[0]; p <= portRange[1]; p++) {
+    if (!usedPorts.has(p)) return p;
+  }
+  return null;
 }

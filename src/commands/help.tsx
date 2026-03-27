@@ -77,7 +77,11 @@ function Help() {
       </Text>
       <Text>
         {"  "}
-        <Text color="cyan">$ dev-proxy worktree add feature 4001</Text>
+        <Text color="cyan">$ dev-proxy worktree create feature-auth</Text>
+      </Text>
+      <Text>
+        {"  "}
+        <Text color="cyan">$ dev-proxy worktree destroy feature-auth</Text>
       </Text>
       <Text>
         {"  "}

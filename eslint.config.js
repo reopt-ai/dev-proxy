@@ -5,7 +5,16 @@ import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
   // ── Ignore patterns ────────────────────────────────────────
-  { ignores: ["dist/", "node_modules/", "bin/", "eslint.config.js", "vitest.config.ts"] },
+  {
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "bin/",
+      "worktrunk/",
+      "eslint.config.js",
+      "vitest.config.ts",
+    ],
+  },
 
   // ── Base ───────────────────────────────────────────────────
   eslint.configs.recommended,

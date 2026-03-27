@@ -1,9 +1,12 @@
+import { execSync } from "node:child_process";
+import { resolve } from "node:path";
 import { Box, Text, render } from "ink";
 import {
   readGlobalConfig,
   readProjectConfig,
   writeProjectConfig,
   isValidPort,
+  allocatePort,
 } from "../cli/config-io.js";
 import {
   Header,
@@ -140,12 +143,238 @@ function WorktreeRemove({ name }: { name: string }) {
   );
 }
 
+// ── Create worktree (full lifecycle) ─────────────────────────
+
+function WorktreeCreate({ branch }: { branch: string }) {
+  const cwd = process.cwd();
+  const projectPath = findOwningProject(cwd);
+
+  if (!projectPath) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message="Current directory is not inside a registered project"
+          hint="Run 'dev-proxy project add .' to register this project first"
+        />
+      </Box>
+    );
+  }
+
+  const cfg = readProjectConfig(projectPath);
+  const wtConfig = cfg.worktreeConfig;
+
+  if (!wtConfig) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message="worktreeConfig not configured in .dev-proxy.json"
+          hint='Add "worktreeConfig": { "portRange": [4001, 5000], "directory": "../project-{branch}" }'
+        />
+      </Box>
+    );
+  }
+
+  const worktrees = cfg.worktrees ?? {};
+
+  if (branch in worktrees) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message={`Worktree "${branch}" already exists (port ${worktrees[branch]!.port})`}
+        />
+      </Box>
+    );
+  }
+
+  // Allocate port
+  const usedPorts = new Set(Object.values(worktrees).map((w) => w.port));
+  const port = allocatePort(wtConfig.portRange, usedPorts);
+  if (port === null) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message={`No available ports in range ${wtConfig.portRange[0]}-${wtConfig.portRange[1]}`}
+          hint="Destroy unused worktrees or expand portRange"
+        />
+      </Box>
+    );
+  }
+
+  // Resolve directory
+  const dirPattern = wtConfig.directory.replace("{branch}", branch);
+  const worktreeDir = resolve(projectPath, dirPattern);
+
+  const messages: string[] = [];
+  const warnings: string[] = [];
+
+  // git worktree add
+  try {
+    execSync(`git worktree add ${JSON.stringify(worktreeDir)} ${branch}`, {
+      cwd: projectPath,
+      stdio: "pipe",
+    });
+    messages.push(`Created git worktree at ${worktreeDir}`);
+  } catch (err) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message={`git worktree add failed: ${(err as Error).message}`}
+          hint="Ensure the branch exists or will be created"
+        />
+      </Box>
+    );
+  }
+
+  // Update config
+  cfg.worktrees = { ...worktrees, [branch]: { port } };
+  writeProjectConfig(projectPath, cfg);
+  messages.push(`Allocated port ${port}`);
+
+  // Run post-create hook
+  const hook = wtConfig.hooks?.["post-create"];
+  if (hook) {
+    try {
+      execSync(hook, { cwd: worktreeDir, stdio: "inherit" });
+      messages.push(`Hook post-create completed`);
+    } catch {
+      warnings.push(`Hook post-create failed (worktree was still created)`);
+    }
+  }
+
+  return (
+    <Box flexDirection="column">
+      <ExitOnRender />
+      {messages.map((m, i) => (
+        <SuccessMessage key={i} message={m} />
+      ))}
+      {warnings.map((w, i) => (
+        <Text key={i}>
+          {"  "}
+          <Text color="yellow">{"\u26A0"}</Text>
+          <Text>{` ${w}`}</Text>
+        </Text>
+      ))}
+      <Text>{""}</Text>
+      <Text
+        dimColor
+      >{`    Access: {branch}--*.${readGlobalConfig().domain ?? "localhost"}:${readGlobalConfig().port ?? 3000}`}</Text>
+    </Box>
+  );
+}
+
+// ── Destroy worktree (full lifecycle) ────────────────────────
+
+function WorktreeDestroy({ branch }: { branch: string }) {
+  const cwd = process.cwd();
+  const projectPath = findOwningProject(cwd);
+
+  if (!projectPath) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message="Current directory is not inside a registered project"
+          hint="Run 'dev-proxy project add .' to register this project first"
+        />
+      </Box>
+    );
+  }
+
+  const cfg = readProjectConfig(projectPath);
+  const worktrees = cfg.worktrees ?? {};
+
+  if (!(branch in worktrees)) {
+    return (
+      <Box flexDirection="column">
+        <ExitOnRender />
+        <ErrorMessage
+          message={`Worktree "${branch}" not found`}
+          hint="Run 'dev-proxy worktree list' to see all worktrees"
+        />
+      </Box>
+    );
+  }
+
+  const wtConfig = cfg.worktreeConfig;
+  const messages: string[] = [];
+  const warnings: string[] = [];
+
+  // Resolve directory
+  const dirPattern = wtConfig
+    ? wtConfig.directory.replace("{branch}", branch)
+    : `../${branch}`;
+  const worktreeDir = resolve(projectPath, dirPattern);
+
+  // Run post-remove hook
+  const hook = wtConfig?.hooks?.["post-remove"];
+  if (hook) {
+    try {
+      execSync(hook, { cwd: worktreeDir, stdio: "inherit" });
+      messages.push(`Hook post-remove completed`);
+    } catch {
+      warnings.push(`Hook post-remove failed (continuing with removal)`);
+    }
+  }
+
+  // git worktree remove
+  try {
+    execSync(`git worktree remove ${JSON.stringify(worktreeDir)} --force`, {
+      cwd: projectPath,
+      stdio: "pipe",
+    });
+    messages.push(`Removed git worktree at ${worktreeDir}`);
+  } catch {
+    warnings.push(`git worktree remove failed (config entry still removed)`);
+  }
+
+  // Update config
+  const { [branch]: _, ...remaining } = worktrees;
+  cfg.worktrees = remaining;
+  writeProjectConfig(projectPath, cfg);
+  messages.push(`Released port ${worktrees[branch]!.port}`);
+
+  return (
+    <Box flexDirection="column">
+      <ExitOnRender />
+      {messages.map((m, i) => (
+        <SuccessMessage key={i} message={m} />
+      ))}
+      {warnings.map((w, i) => (
+        <Text key={i}>
+          {"  "}
+          <Text color="yellow">{"\u26A0"}</Text>
+          <Text>{` ${w}`}</Text>
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
 // ── Entry point ──────────────────────────────────────────────
 
 const args = process.argv.slice(3);
 const subcommand = args[0];
 
-if (subcommand === "add") {
+if (subcommand === "create") {
+  const branch = args[1];
+  if (!branch) {
+    render(<ErrorMessage message="Usage: dev-proxy worktree create <branch>" />);
+  } else {
+    render(<WorktreeCreate branch={branch} />);
+  }
+} else if (subcommand === "destroy") {
+  const branch = args[1];
+  if (!branch) {
+    render(<ErrorMessage message="Usage: dev-proxy worktree destroy <branch>" />);
+  } else {
+    render(<WorktreeDestroy branch={branch} />);
+  }
+} else if (subcommand === "add") {
   const name = args[1];
   const portStr = args[2];
   if (!name || !portStr) {

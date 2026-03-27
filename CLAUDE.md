@@ -54,7 +54,9 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 
 ## CLI Commands
 
-All subcommands are Ink components in `src/commands/`. Shared output primitives (`Header`, `Section`, `Check`, `Row`) in `src/cli/output.tsx`. Shared input primitives (`TextPrompt`, `Confirm`) in `src/cli/prompt.tsx`. Routing in `src/cli.ts` (process.argv, no framework). Unknown commands suggest closest match via Levenshtein distance.
+All subcommands are Ink components in `src/commands/`. Shared output primitives (`Header`, `Section`, `Check`, `Row`) in `src/cli/output.tsx`. Shared config I/O and port allocation in `src/cli/config-io.ts`. Routing in `src/cli.ts` (process.argv, no framework). Unknown commands suggest closest match via Levenshtein distance.
+
+`worktree create/destroy` — full lifecycle (git worktree + auto port + hooks). `worktree add/remove` — manual registration only. `worktreeConfig` in `.dev-proxy.json` enables lifecycle commands with `portRange`, `directory` pattern, and `hooks`.
 
 To add a new command: create `src/commands/<name>.tsx`, add case to `src/cli.ts`, update help.tsx.
 

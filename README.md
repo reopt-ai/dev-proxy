@@ -132,25 +132,47 @@ When mkcert is installed, dev-proxy automatically generates wildcard certificate
 
 dev-proxy supports git worktree-based dynamic routing. When you use `branch--app.domain` as the hostname, it routes to a per-worktree port.
 
-**How it works:**
+**Automatic lifecycle management:**
 
-1. Add worktrees to your project's `.dev-proxy.json`:
+Add `worktreeConfig` to your project's `.dev-proxy.json`:
 
 ```json
 {
-  "routes": { "www": "http://localhost:3001" },
-  "worktrees": {
-    "feature-auth": { "port": 4001 },
-    "fix-nav": { "port": 4002 }
+  "routes": { "www": "http://localhost:3001", "*": "http://localhost:3001" },
+  "worktrees": { "main": { "port": 3001 } },
+  "worktreeConfig": {
+    "portRange": [4001, 5000],
+    "directory": "../myproject-{branch}",
+    "hooks": {
+      "post-create": "pnpm install",
+      "post-remove": "echo cleanup done"
+    }
   }
 }
 ```
 
-2. Access `feature-auth--www.example.dev:3000` and it routes to `localhost:4001`
-3. The file is watched live — add/remove entries and routing updates instantly
-4. Unregistered worktrees show an offline error page instead of silently falling back
+Then create and destroy worktrees with a single command:
 
-This lets multiple worktree checkouts run simultaneously on different ports without config changes.
+```bash
+dev-proxy worktree create feature-auth
+# → git worktree add, auto port allocation, runs post-create hook
+
+dev-proxy worktree destroy feature-auth
+# → runs post-remove hook, git worktree remove, releases port
+```
+
+**How routing works:**
+
+- Access `feature-auth--www.example.dev:3000` and it routes to the allocated port
+- The config file is watched live — routing updates instantly on changes
+- Unregistered worktrees show an offline error page instead of silently falling back
+
+**Manual mode** (without `worktreeConfig`):
+
+```bash
+dev-proxy worktree add feature-auth 4001    # Register only (no git operations)
+dev-proxy worktree remove feature-auth      # Unregister only
+```
 
 ## Usage
 
@@ -276,8 +298,10 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 | `dev-proxy project add [path]`         | Register a project (default: cwd)                |
 | `dev-proxy project remove <path>`      | Unregister a project                             |
 | `dev-proxy project list`               | List registered projects                         |
-| `dev-proxy worktree add <name> <port>` | Add worktree to current project                  |
-| `dev-proxy worktree remove <name>`     | Remove worktree                                  |
+| `dev-proxy worktree create <branch>`   | Create worktree with auto port + hooks           |
+| `dev-proxy worktree destroy <branch>`  | Destroy worktree with hooks + cleanup            |
+| `dev-proxy worktree add <name> <port>` | Register worktree manually (no git operations)   |
+| `dev-proxy worktree remove <name>`     | Unregister worktree manually                     |
 | `dev-proxy worktree list`              | List all worktrees                               |
 | `dev-proxy --help`                     | Show help                                        |
 | `dev-proxy --version`                  | Show version                                     |

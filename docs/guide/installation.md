@@ -163,18 +163,46 @@ Then create `.dev-proxy.json` in that project with its routes.
 
 ## Adding Worktrees
 
-For git worktree workflows, add to the project's `.dev-proxy.json`:
+For git worktree workflows, add `worktreeConfig` to the project's `.dev-proxy.json`:
 
 ```json
 {
   "routes": { "...": "..." },
-  "worktrees": {
-    "feature-branch": { "port": 4001 }
+  "worktrees": {},
+  "worktreeConfig": {
+    "portRange": [4001, 5000],
+    "directory": "../PROJECT_NAME-{branch}",
+    "hooks": {
+      "post-create": "pnpm install",
+      "post-remove": "echo cleanup"
+    }
   }
 }
 ```
 
-Access via: `feature-branch--www.DOMAIN:3000`
+Replace `PROJECT_NAME` with the actual project name. The `{branch}` placeholder is replaced with the branch name.
+
+Then create worktrees with automatic port allocation:
+
+```bash
+dev-proxy worktree create feature-auth
+# → Creates git worktree, allocates port from range, runs post-create hook
+```
+
+Access via: `feature-auth--www.DOMAIN:3000`
+
+Destroy when done:
+
+```bash
+dev-proxy worktree destroy feature-auth
+```
+
+For manual registration without git operations:
+
+```bash
+dev-proxy worktree add feature-auth 4001
+dev-proxy worktree remove feature-auth
+```
 
 ## Troubleshooting
 

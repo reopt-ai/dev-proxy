@@ -132,25 +132,47 @@ mkcert가 설치되어 있으면 첫 실행 시 와일드카드 인증서를 자
 
 dev-proxy는 Git worktree 기반 동적 라우팅을 지원합니다. 호스트명에 `branch--app.domain` 형태를 사용하면 워크트리별 포트로 라우팅됩니다.
 
-**동작 방식:**
+**자동 라이프사이클 관리:**
 
-1. 프로젝트의 `.dev-proxy.json`에 워크트리를 등록합니다:
+프로젝트의 `.dev-proxy.json`에 `worktreeConfig`를 추가합니다:
 
 ```json
 {
-  "routes": { "www": "http://localhost:3001" },
-  "worktrees": {
-    "feature-auth": { "port": 4001 },
-    "fix-nav": { "port": 4002 }
+  "routes": { "www": "http://localhost:3001", "*": "http://localhost:3001" },
+  "worktrees": { "main": { "port": 3001 } },
+  "worktreeConfig": {
+    "portRange": [4001, 5000],
+    "directory": "../myproject-{branch}",
+    "hooks": {
+      "post-create": "pnpm install",
+      "post-remove": "echo cleanup done"
+    }
   }
 }
 ```
 
-2. `feature-auth--www.example.dev:3000`에 접속하면 `localhost:4001`로 라우팅
-3. 파일을 실시간 감시 — 항목을 추가/제거하면 즉시 라우팅이 업데이트
-4. 미등록 워크트리는 silent fallback 없이 오프라인 에러 페이지 표시
+한 줄로 워크트리를 생성/제거합니다:
 
-여러 워크트리 체크아웃을 서로 다른 포트에서 동시에 실행하면서 설정 변경 없이 사용할 수 있습니다.
+```bash
+dev-proxy worktree create feature-auth
+# → git worktree add, 자동 포트 할당, post-create 훅 실행
+
+dev-proxy worktree destroy feature-auth
+# → post-remove 훅 실행, git worktree remove, 포트 해제
+```
+
+**라우팅 방식:**
+
+- `feature-auth--www.example.dev:3000` 접속 → 할당된 포트로 라우팅
+- 설정 파일 실시간 감시 — 변경 즉시 라우팅 업데이트
+- 미등록 워크트리는 silent fallback 없이 오프라인 에러 페이지 표시
+
+**수동 모드** (`worktreeConfig` 없이):
+
+```bash
+dev-proxy worktree add feature-auth 4001    # 등록만 (git 조작 없음)
+dev-proxy worktree remove feature-auth      # 해제만
+```
 
 ## 실행
 
@@ -276,8 +298,10 @@ mkcert -install
 | `dev-proxy project add [path]`         | 프로젝트 등록 (기본: cwd)                  |
 | `dev-proxy project remove <path>`      | 프로젝트 해제                              |
 | `dev-proxy project list`               | 등록된 프로젝트 목록                       |
-| `dev-proxy worktree add <name> <port>` | 현재 프로젝트에 워크트리 추가              |
-| `dev-proxy worktree remove <name>`     | 워크트리 제거                              |
+| `dev-proxy worktree create <branch>`   | 워크트리 생성 (자동 포트 + 훅 실행)        |
+| `dev-proxy worktree destroy <branch>`  | 워크트리 제거 (훅 실행 + 정리)             |
+| `dev-proxy worktree add <name> <port>` | 워크트리 수동 등록 (git 조작 없음)         |
+| `dev-proxy worktree remove <name>`     | 워크트리 수동 해제                         |
 | `dev-proxy worktree list`              | 워크트리 목록                              |
 | `dev-proxy --help`                     | 도움말                                     |
 | `dev-proxy --version`                  | 버전                                       |
