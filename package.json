@@ -1,6 +1,6 @@
 {
   "name": "@reopt-ai/dev-proxy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Subdomain-based reverse proxy and HTTP/WS traffic inspector TUI",
   "license": "MIT",
   "author": "reopt.ai",
@@ -33,6 +33,7 @@
   "files": [
     "bin",
     "dist",
+    "!dist/.tsbuildinfo",
     "LICENSE",
     "README.md",
     "README_KO.md"

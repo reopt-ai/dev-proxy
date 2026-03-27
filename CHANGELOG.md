@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.0 (2026-03-27)
+
+### Features
+
+- add worktree diagnostics to doctor command
+- multi-port worktree services with .env.local generation
+- add worktree create/destroy lifecycle commands
+
+### Documentation
+
+- improve LLM installation guide clarity and edge cases
+- add LLM agent installation guide
+- add CLI, worktree lifecycle, and LLM guide changelog entries
+
+### Maintenance
+
+- add publish skill and no-autonomous-push rule
+- exclude .tsbuildinfo from npm package
+
 ## 1.0.0 (2026-03-26)
 
 Initial open-source release.
