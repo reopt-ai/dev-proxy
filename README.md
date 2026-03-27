@@ -1,5 +1,6 @@
 # dev-proxy
 
+[![npm](https://img.shields.io/npm/v/@reopt-ai/dev-proxy)](https://www.npmjs.com/package/@reopt-ai/dev-proxy)
 [![CI](https://github.com/reopt-ai/dev-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/reopt-ai/dev-proxy/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
@@ -47,7 +48,7 @@ dev-proxy is:
 
 ```bash
 # 1. Install
-npm install -g dev-proxy
+npm install -g @reopt-ai/dev-proxy
 
 # 2. Interactive setup
 dev-proxy init
@@ -62,10 +63,10 @@ Press **Enter** to arm the inspector, then open `http://www.example.dev:3000` in
 
 ```bash
 # npx (no install)
-npx dev-proxy
+npx @reopt-ai/dev-proxy
 
 # Global install
-npm install -g dev-proxy
+npm install -g @reopt-ai/dev-proxy
 
 # From source
 git clone https://github.com/reopt-ai/dev-proxy.git

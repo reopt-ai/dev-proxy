@@ -1,12 +1,19 @@
 {
-  "name": "dev-proxy",
+  "name": "@reopt-ai/dev-proxy",
   "version": "1.0.0",
   "description": "Subdomain-based reverse proxy and HTTP/WS traffic inspector TUI",
   "license": "MIT",
   "author": "reopt.ai",
+  "homepage": "https://github.com/reopt-ai/dev-proxy#readme",
+  "bugs": {
+    "url": "https://github.com/reopt-ai/dev-proxy/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/reopt-ai/dev-proxy.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "proxy",
