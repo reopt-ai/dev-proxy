@@ -51,6 +51,7 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 - **Noise eviction order** — when MAX_EVENTS exceeded, oldest noise (`/_next/*`, `favicon`) is removed before real requests.
 - **Type imports required** — `import type { Foo }` enforced by ESLint; plain import of type-only symbols will fail lint.
 - **ESM only** — `"type": "module"`, all imports need `.js` extensions, no `require()`.
+- **Never `git push` autonomously** — commit is fine, but push must be explicitly requested by the user.
 
 ## CLI Commands
 
