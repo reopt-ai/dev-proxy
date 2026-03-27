@@ -25,8 +25,10 @@ export function readGlobalConfig(): RawGlobalConfig {
     if (existsSync(GLOBAL_CONFIG_PATH)) {
       return JSON.parse(readFileSync(GLOBAL_CONFIG_PATH, "utf-8")) as RawGlobalConfig;
     }
-  } catch {
-    // corrupt file — treat as empty
+  } catch (err) {
+    console.warn(
+      `[dev-proxy] Failed to parse ${GLOBAL_CONFIG_PATH}: ${(err as Error).message}`,
+    );
   }
   return {};
 }
@@ -97,8 +99,8 @@ export function readProjectConfig(projectPath: string): RawProjectConfig {
     if (existsSync(configPath)) {
       return JSON.parse(readFileSync(configPath, "utf-8")) as RawProjectConfig;
     }
-  } catch {
-    // corrupt file — treat as empty
+  } catch (err) {
+    console.warn(`[dev-proxy] Failed to parse ${configPath}: ${(err as Error).message}`);
   }
   return {};
 }
@@ -112,6 +114,13 @@ export function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): 
 
 export function isValidPort(value: number): boolean {
   return Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
+const SUBDOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+/** Validate a subdomain label (lowercase alphanumeric + hyphens, no leading/trailing hyphen). */
+export function isValidSubdomain(value: string): boolean {
+  return value === "*" || SUBDOMAIN_RE.test(value);
 }
 
 // ── Port allocation ──────────────────────────────────────────

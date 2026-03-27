@@ -10,6 +10,7 @@ import {
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_NAME,
   isValidPort,
+  isValidSubdomain,
   type RawGlobalConfig,
 } from "../cli/config-io.js";
 import { ExitOnRender } from "../cli/output.js";
@@ -52,27 +53,49 @@ function RouteInput({
   onDone: () => void;
 }) {
   const [value, setValue] = useState("");
+  const [error, setError] = useState("");
 
   return (
-    <Box>
-      <Text dimColor>{"    "}</Text>
-      <TextInput
-        value={value}
-        placeholder="subdomain=port (empty to finish)"
-        onChange={setValue}
-        onSubmit={(v) => {
-          const trimmed = v.trim();
-          if (!trimmed) {
-            onDone();
-            return;
-          }
-          const eq = trimmed.indexOf("=");
-          if (eq !== -1) {
-            onAdd(trimmed.slice(0, eq).trim(), trimmed.slice(eq + 1).trim());
-          }
-          setValue("");
-        }}
-      />
+    <Box flexDirection="column">
+      <Box>
+        <Text dimColor>{"    "}</Text>
+        <TextInput
+          value={value}
+          placeholder="subdomain=port (empty to finish)"
+          onChange={(v) => {
+            setValue(v);
+            setError("");
+          }}
+          onSubmit={(v) => {
+            const trimmed = v.trim();
+            if (!trimmed) {
+              onDone();
+              return;
+            }
+            const eq = trimmed.indexOf("=");
+            if (eq === -1) {
+              setError("Expected format: subdomain=port (e.g. api=4000)");
+              return;
+            }
+            const sub = trimmed.slice(0, eq).trim();
+            if (!isValidSubdomain(sub)) {
+              setError(
+                `Invalid subdomain "${sub}" — use lowercase alphanumeric and hyphens only`,
+              );
+              return;
+            }
+            onAdd(sub, trimmed.slice(eq + 1).trim());
+            setValue("");
+            setError("");
+          }}
+        />
+      </Box>
+      {error && (
+        <Text color="red">
+          {"      "}
+          {error}
+        </Text>
+      )}
     </Box>
   );
 }

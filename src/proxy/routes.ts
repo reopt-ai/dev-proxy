@@ -41,6 +41,10 @@ for (const project of config.projects) {
     if (!parsedRoutes.has(subdomain)) {
       const parsed = parseTarget(`${project.path} routes.${subdomain}`, target);
       if (parsed) parsedRoutes.set(subdomain, parsed);
+    } else {
+      console.warn(
+        `[dev-proxy] Ignoring duplicate subdomain "${subdomain}" from ${project.path} (already registered)`,
+      );
     }
   }
 }
