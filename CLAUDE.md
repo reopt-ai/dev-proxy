@@ -23,7 +23,7 @@ Lefthook enforces: commit-msg (conventional commit), pre-commit (typecheck + lin
 `<type>(<scope>): <subject>` — max 72 chars, imperative mood, lowercase, no period.
 
 - Types: `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert`
-- Scopes: `proxy`, `store`, `ui`, `config`, `certs`, `routes`
+- Scopes: `proxy`, `store`, `ui`, `config`, `certs`, `routes`, `cli`
 - Breaking: `feat!: ...`
 
 ## Architecture
@@ -39,9 +39,9 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 
 **Proxy flow**: `createProxyServer()` → emitter fires `request` / `request:complete` / `request:error` / `ws` → store receives via `pushHttp`/`pushWs` → React renders via snapshot.
 
-**Config priority**: `.proxy.json` (searched upward from cwd) > `~/.dev-proxy/config.json` > hardcoded defaults. Relative paths resolve relative to the config file, not cwd.
+**Config**: `~/.dev-proxy/config.json` (global: domain, ports, TLS, `projects` array) → each project's `.dev-proxy.json` (routes + worktrees). No cwd-based search — projects are explicitly registered.
 
-**Routing**: `host.split(".")[0]` extracts subdomain → lookup in routes map → fallback to `defaultTarget`. Worktree syntax: `branch--app.domain` → queries worktree registry.
+**Routing**: `host.split(".")[0]` extracts subdomain → exact match in merged routes → `"*"` wildcard fallback → `null` (502). Worktree syntax: `branch--app.domain` → lookup in project worktrees → unregistered = offline error page (no silent fallback).
 
 ## Critical Invariants
 
@@ -52,6 +52,12 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 - **Type imports required** — `import type { Foo }` enforced by ESLint; plain import of type-only symbols will fail lint.
 - **ESM only** — `"type": "module"`, all imports need `.js` extensions, no `require()`.
 
+## CLI Commands
+
+All subcommands are Ink components in `src/commands/`. Shared output primitives (`Header`, `Section`, `Check`, `Row`) in `src/cli/output.tsx`. Shared input primitives (`TextPrompt`, `Confirm`) in `src/cli/prompt.tsx`. Routing in `src/cli.ts` (process.argv, no framework). Unknown commands suggest closest match via Levenshtein distance.
+
+To add a new command: create `src/commands/<name>.tsx`, add case to `src/cli.ts`, update help.tsx.
+
 ## Testing
 
-Tests co-located with source: `foo.ts` → `foo.test.ts`. Store exposes `__testing` namespace for test access to internals. UI components are tested manually in terminal.
+Tests co-located with source: `foo.ts` → `foo.test.ts`. Store exposes `__testing` namespace for test access to internals. UI components and CLI commands are tested manually in terminal.

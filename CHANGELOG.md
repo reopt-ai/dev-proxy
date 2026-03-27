@@ -15,4 +15,5 @@ Initial open-source release.
 - Request replay and curl copy to clipboard
 - Worktree-based dynamic routing (`branch--app.domain`)
 - Auto-generated TLS certificates via mkcert
-- Three-tier config: defaults, global (`~/.dev-proxy/config.json`), project (`.proxy.json`)
+- Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`.dev-proxy.json`)
+- Wildcard route (`"*"`) for unmatched subdomain fallback

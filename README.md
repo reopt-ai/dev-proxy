@@ -6,6 +6,8 @@
 
 **Subdomain-based reverse proxy with a real-time HTTP/WS traffic inspector TUI.**
 
+Built for agentic development workflows where dozens of services, worktrees, and AI-driven coding sessions run simultaneously — one proxy to route them all, one terminal to see everything.
+
 Routes `*.{domain}:3000` requests to local services by subdomain and displays all traffic in a terminal dashboard. Think of it as a lightweight, terminal-native alternative to tools like Charles or Proxyman — purpose-built for local multi-service development.
 
 [한국어 문서 (Korean)](README_KO.md)
@@ -32,9 +34,9 @@ dev-proxy is:
 - Noise filter (`_next/`, `favicon`), error-only mode, URL/method search
 - Request replay with original headers and curl copy to clipboard
 - Upstream `http`/`https` and `ws`/`wss` target support
-- Git worktree-based dynamic routing via `.worktrees.json`
+- Git worktree-based dynamic routing via project config
 - Auto-generated TLS certificates via [mkcert](https://github.com/FiloSottile/mkcert)
-- Three-tier config: defaults → global → per-project
+- Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`.dev-proxy.json`)
 
 ## Prerequisites
 
@@ -47,17 +49,8 @@ dev-proxy is:
 # 1. Install
 npm install -g dev-proxy
 
-# 2. Create a config (optional — works without one using localhost defaults)
-mkdir -p ~/.dev-proxy
-cat > ~/.dev-proxy/config.json << 'EOF'
-{
-  "domain": "example.dev",
-  "routes": {
-    "www": "http://localhost:3001",
-    "api": "http://localhost:4000"
-  }
-}
-EOF
+# 2. Interactive setup
+dev-proxy init
 
 # 3. Run
 dev-proxy
@@ -81,11 +74,10 @@ cd dev-proxy && pnpm install && pnpm proxy
 
 ## Configuration
 
-Config is loaded in three layers (later layers override earlier ones):
+Config is split into two layers:
 
-1. **Defaults** — `domain: "localhost"`, `port: 3000`, `httpsPort: 3443`
-2. **`~/.dev-proxy/config.json`** — Global user config
-3. **`.proxy.json`** — Per-project override (searched from cwd upward)
+1. **`~/.dev-proxy/config.json`** — Global settings (domain, ports, TLS, project list)
+2. **`.dev-proxy.json`** — Per-project config (routes, worktrees)
 
 ### Global Config (`~/.dev-proxy/config.json`)
 
@@ -94,33 +86,31 @@ Config is loaded in three layers (later layers override earlier ones):
   "domain": "example.dev",
   "port": 3000,
   "httpsPort": 3443,
-  "defaultTarget": "http://localhost:3001",
-  "routes": {
-    "www": "http://localhost:3001",
-    "studio": "http://localhost:3001",
-    "api": "http://localhost:4000",
-    "docs": "http://localhost:3003",
-    "admin": "http://localhost:3002"
-  }
+  "projects": ["/path/to/your/project"]
 }
 ```
 
-### Project Override (`.proxy.json`)
+### Project Config (`.dev-proxy.json`)
 
-Place a `.proxy.json` in your project root to override global config. JSON parse errors, invalid ports, and unsupported URL protocols are warned at startup and ignored.
+Place a `.dev-proxy.json` in each project root registered in `projects`. Routes and worktrees are defined here.
 
 ```json
 {
   "routes": {
+    "www": "http://localhost:3001",
+    "studio": "http://localhost:3001",
     "api": "http://localhost:4000",
-    "oauth": "https://localhost:9443"
+    "*": "http://localhost:3001"
   },
-  "certPath": "certs/dev+1.pem",
-  "keyPath": "certs/dev+1-key.pem"
+  "worktrees": {
+    "feature-auth": { "port": 4001 }
+  }
 }
 ```
 
-> `certPath`/`keyPath` are resolved relative to the `.proxy.json` file location.
+- `"*"` is a wildcard — unmatched subdomains route here
+- When multiple projects register the same subdomain, the first one wins
+- `certPath`/`keyPath` are set in the global config, resolved relative to `~/.dev-proxy/`
 
 ### HTTPS
 
@@ -139,20 +129,21 @@ dev-proxy supports git worktree-based dynamic routing. When you use `branch--app
 
 **How it works:**
 
-1. A `.worktrees.json` file maps branch names to ports:
+1. Add worktrees to your project's `.dev-proxy.json`:
 
 ```json
 {
+  "routes": { "www": "http://localhost:3001" },
   "worktrees": {
-    "feature-auth": { "port": 3101 },
-    "fix-nav": { "port": 3102 }
-  },
-  "nextPort": 3103
+    "feature-auth": { "port": 4001 },
+    "fix-nav": { "port": 4002 }
+  }
 }
 ```
 
-2. Access `feature-auth--www.example.dev:3000` and it routes to `localhost:3101`
+2. Access `feature-auth--www.example.dev:3000` and it routes to `localhost:4001`
 3. The file is watched live — add/remove entries and routing updates instantly
+4. Unregistered worktrees show an offline error page instead of silently falling back
 
 This lets multiple worktree checkouts run simultaneously on different ports without config changes.
 
@@ -241,7 +232,7 @@ Kill the existing process or use a different port in your config:
 lsof -ti :3000 | xargs kill
 
 # Or change port
-echo '{ "port": 3080 }' > .proxy.json
+# Or change port in ~/.dev-proxy/config.json: "port": 3080
 ```
 
 ### mkcert not found
@@ -267,14 +258,46 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 2. Verify your `Host` header matches `subdomain.domain:port`
 3. Ensure the target service is actually running on the configured port
 
+## CLI Reference
+
+| Command                                | Description                                      |
+| -------------------------------------- | ------------------------------------------------ |
+| `dev-proxy`                            | Start proxy and open traffic inspector           |
+| `dev-proxy init`                       | Interactive setup wizard                         |
+| `dev-proxy status`                     | Show configuration and routing table             |
+| `dev-proxy doctor`                     | Run environment diagnostics                      |
+| `dev-proxy config`                     | View global settings                             |
+| `dev-proxy config set <key> <value>`   | Modify global settings (domain, port, httpsPort) |
+| `dev-proxy project add [path]`         | Register a project (default: cwd)                |
+| `dev-proxy project remove <path>`      | Unregister a project                             |
+| `dev-proxy project list`               | List registered projects                         |
+| `dev-proxy worktree add <name> <port>` | Add worktree to current project                  |
+| `dev-proxy worktree remove <name>`     | Remove worktree                                  |
+| `dev-proxy worktree list`              | List all worktrees                               |
+| `dev-proxy --help`                     | Show help                                        |
+| `dev-proxy --version`                  | Show version                                     |
+
 ## Architecture
 
 ```
 src/
-├── index.tsx              # Entry (Ink render + proxy lifecycle)
+├── cli.ts                 # Subcommand router
+├── index.tsx              # TUI dashboard (Ink render + proxy lifecycle)
 ├── store.ts               # External store (useSyncExternalStore)
+├── commands/              # CLI subcommands (Ink components)
+│   ├── init.tsx           # Interactive setup wizard
+│   ├── status.tsx         # Configuration overview
+│   ├── doctor.tsx         # Environment diagnostics
+│   ├── config.tsx         # Config view/set
+│   ├── project.tsx        # Project management
+│   ├── worktree.tsx       # Worktree management
+│   ├── help.tsx           # Help output
+│   └── version.tsx        # Version output
+├── cli/                   # Shared CLI components
+│   ├── output.tsx         # Display components (Header, Section, Check, etc.)
+│   └── prompt.tsx         # Input components (TextPrompt, Confirm)
 ├── proxy/
-│   ├── config.ts          # Config loader (~/.dev-proxy + .proxy.json)
+│   ├── config.ts          # Config loader (~/.dev-proxy + .dev-proxy.json)
 │   ├── server.ts          # HTTP/WS reverse proxy
 │   ├── routes.ts          # Subdomain → target routing
 │   ├── certs.ts           # TLS certificate resolution (mkcert)
