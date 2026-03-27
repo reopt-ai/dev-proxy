@@ -119,13 +119,27 @@ function collectSubdomains(projects: ProjectConfig[]): string[] {
   return [...subs];
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("timeout"));
+      }, ms);
+    }),
+  ]);
+}
+
 async function checkDns(subdomains: string[], domain: string): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   for (const sub of subdomains) {
     const hostname = `${sub}.${domain}`;
     try {
-      const { address } = await dns.promises.lookup(hostname, { family: 4 });
+      const { address } = await withTimeout(
+        dns.promises.lookup(hostname, { family: 4 }),
+        5000,
+      );
       results.push({
         ok: address === "127.0.0.1",
         warn: address !== "127.0.0.1",

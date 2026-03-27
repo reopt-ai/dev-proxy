@@ -1,53 +1,17 @@
-import { useState } from "react";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { homedir } from "node:os";
-import { Box, Text, render, useApp } from "ink";
-import { Header, Row, SuccessMessage, ErrorMessage } from "../cli/output.js";
-
-const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
-const CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_NAME = ".dev-proxy.json";
-
-interface RawGlobalConfig {
-  domain?: string;
-  port?: number;
-  httpsPort?: number;
-  projects?: string[];
-}
-
-interface RawProjectConfig {
-  routes?: Record<string, string>;
-  worktrees?: Record<string, { port: number }>;
-}
-
-function readGlobalConfig(): RawGlobalConfig {
-  try {
-    if (existsSync(CONFIG_PATH)) {
-      return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as RawGlobalConfig;
-    }
-  } catch {
-    // corrupt — treat as empty
-  }
-  return {};
-}
-
-function readProjectConfig(projectPath: string): RawProjectConfig {
-  const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
-  try {
-    if (existsSync(configPath)) {
-      return JSON.parse(readFileSync(configPath, "utf-8")) as RawProjectConfig;
-    }
-  } catch {
-    // corrupt
-  }
-  return { routes: {}, worktrees: {} };
-}
-
-function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): void {
-  const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
-  writeFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
-}
+import { Box, Text, render } from "ink";
+import {
+  readGlobalConfig,
+  readProjectConfig,
+  writeProjectConfig,
+  isValidPort,
+} from "../cli/config-io.js";
+import {
+  Header,
+  Row,
+  SuccessMessage,
+  ErrorMessage,
+  ExitOnRender,
+} from "../cli/output.js";
 
 function findOwningProject(cwd: string): string | null {
   const cfg = readGlobalConfig();
@@ -57,14 +21,6 @@ function findOwningProject(cwd: string): string | null {
       return p;
     }
   }
-  return null;
-}
-
-function ExitOnRender() {
-  const { exit } = useApp();
-  useState(() => {
-    setTimeout(exit, 0);
-  });
   return null;
 }
 
@@ -196,7 +152,7 @@ if (subcommand === "add") {
     render(<ErrorMessage message="Usage: dev-proxy worktree add <name> <port>" />);
   } else {
     const port = Number(portStr);
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    if (!isValidPort(port)) {
       render(
         <ErrorMessage
           message={`Invalid port "${portStr}"`}

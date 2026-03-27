@@ -1,50 +1,17 @@
-import { useState } from "react";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { homedir } from "node:os";
-import { Box, render, useApp } from "ink";
-import { Header, Row, SuccessMessage, ErrorMessage } from "../cli/output.js";
-
-const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
-const CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
-
-interface RawGlobalConfig {
-  domain?: string;
-  port?: number;
-  httpsPort?: number;
-  certPath?: string;
-  keyPath?: string;
-  projects?: string[];
-}
-
-function readConfig(): RawGlobalConfig {
-  try {
-    if (existsSync(CONFIG_PATH)) {
-      return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as RawGlobalConfig;
-    }
-  } catch {
-    // corrupt file — treat as empty
-  }
-  return {};
-}
-
-function writeConfig(cfg: RawGlobalConfig): void {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
-}
-
-function ExitOnRender() {
-  const { exit } = useApp();
-  useState(() => {
-    setTimeout(exit, 0);
-  });
-  return null;
-}
+import { Box, render } from "ink";
+import { readGlobalConfig, writeGlobalConfig } from "../cli/config-io.js";
+import {
+  Header,
+  Row,
+  SuccessMessage,
+  ErrorMessage,
+  ExitOnRender,
+} from "../cli/output.js";
 
 // ── Show current config ──────────────────────────────────────
 
 function ConfigView() {
-  const cfg = readConfig();
+  const cfg = readGlobalConfig();
   return (
     <Box flexDirection="column">
       <ExitOnRender />
@@ -75,7 +42,7 @@ function ConfigSet({ configKey, value }: { configKey: string; value: string }) {
     error = `Unknown config key "${configKey}"`;
     hint = `Supported keys: ${[...VALID_KEYS].join(", ")}`;
   } else {
-    const cfg = readConfig();
+    const cfg = readGlobalConfig();
 
     if (configKey === "domain") {
       cfg.domain = value;
@@ -91,7 +58,7 @@ function ConfigSet({ configKey, value }: { configKey: string; value: string }) {
     }
 
     if (!error) {
-      writeConfig(cfg);
+      writeGlobalConfig(cfg);
       message = `Set ${configKey} = ${value}`;
     }
   }

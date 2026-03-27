@@ -1,23 +1,18 @@
 import { useState } from "react";
-import { render, Box, Text, useApp, useInput } from "ink";
+import { render, Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
-import { homedir, platform } from "node:os";
+import { platform } from "node:os";
 import { execFileSync } from "node:child_process";
-
-const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
-const GLOBAL_CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_NAME = ".dev-proxy.json";
-
-// ── Types ────────────────────────────────────────────────────
-
-interface RawGlobalConfig {
-  domain?: string;
-  port?: number;
-  httpsPort?: number;
-  projects?: string[];
-}
+import {
+  CONFIG_DIR,
+  GLOBAL_CONFIG_PATH,
+  PROJECT_CONFIG_NAME,
+  isValidPort,
+  type RawGlobalConfig,
+} from "../cli/config-io.js";
+import { ExitOnRender } from "../cli/output.js";
 
 interface Route {
   subdomain: string;
@@ -155,8 +150,13 @@ function InitWizard() {
   };
 
   const writeConfigs = (overwriteProject: boolean) => {
-    // Global config
-    mkdirSync(CONFIG_DIR, { recursive: true });
+    try {
+      mkdirSync(CONFIG_DIR, { recursive: true });
+    } catch (err) {
+      addMessage(`Failed to create ${CONFIG_DIR}: ${(err as Error).message}`);
+      setStep("done");
+      return;
+    }
     const absPath = isAbsolute(projectPath)
       ? projectPath
       : resolve(process.cwd(), projectPath);
@@ -192,7 +192,11 @@ function InitWizard() {
       };
       addMessage(`Created ${GLOBAL_CONFIG_PATH}`);
     }
-    writeFileSync(GLOBAL_CONFIG_PATH, JSON.stringify(globalConfig, null, 2) + "\n");
+    try {
+      writeFileSync(GLOBAL_CONFIG_PATH, JSON.stringify(globalConfig, null, 2) + "\n");
+    } catch (err) {
+      addMessage(`Failed to write ${GLOBAL_CONFIG_PATH}: ${(err as Error).message}`);
+    }
 
     // Project config
     const projectConfigPath = resolve(absPath, PROJECT_CONFIG_NAME);
@@ -205,11 +209,15 @@ function InitWizard() {
     }
 
     if (!existsSync(projectConfigPath) || overwriteProject) {
-      writeFileSync(
-        projectConfigPath,
-        JSON.stringify({ routes: routeMap, worktrees: {} }, null, 2) + "\n",
-      );
-      addMessage(`Created ${projectConfigPath}`);
+      try {
+        writeFileSync(
+          projectConfigPath,
+          JSON.stringify({ routes: routeMap, worktrees: {} }, null, 2) + "\n",
+        );
+        addMessage(`Created ${projectConfigPath}`);
+      } catch (err) {
+        addMessage(`Failed to write ${projectConfigPath}: ${(err as Error).message}`);
+      }
     } else {
       addMessage(`Skipped ${projectConfigPath}`);
     }
@@ -281,6 +289,8 @@ function InitWizard() {
           label="HTTP port"
           defaultValue="3000"
           onSubmit={(v) => {
+            const num = parseInt(v, 10);
+            if (!isValidPort(num)) return;
             setHttpPort(v);
             setStep("httpsPort");
           }}
@@ -292,6 +302,8 @@ function InitWizard() {
           label="HTTPS port"
           defaultValue="3443"
           onSubmit={(v) => {
+            const num = parseInt(v, 10);
+            if (!isValidPort(num)) return;
             setHttpsPort(v);
             setStep("projectPath");
           }}
@@ -428,19 +440,11 @@ function InitWizard() {
               <Text>{" to start."}</Text>
             </Text>
           </Box>
-          <ExitOnDone />
+          <ExitOnRender />
         </Box>
       )}
     </Box>
   );
-}
-
-function ExitOnDone() {
-  const { exit } = useApp();
-  useState(() => {
-    setTimeout(exit, 100);
-  });
-  return null;
 }
 
 render(<InitWizard />);

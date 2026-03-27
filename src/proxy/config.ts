@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 // ── Paths ────────────────────────────────────────────────────
 export const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
 export const GLOBAL_CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_NAME = ".dev-proxy.json";
+export const PROJECT_CONFIG_NAME = ".dev-proxy.json";
 
 // ── Types ────────────────────────────────────────────────────
 

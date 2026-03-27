@@ -1,63 +1,19 @@
-import { useState } from "react";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { homedir } from "node:os";
-import { Box, Text, render, useApp } from "ink";
-import { Header, Row, SuccessMessage, ErrorMessage } from "../cli/output.js";
-
-const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
-const CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
-const PROJECT_CONFIG_NAME = ".dev-proxy.json";
-
-interface RawGlobalConfig {
-  domain?: string;
-  port?: number;
-  httpsPort?: number;
-  certPath?: string;
-  keyPath?: string;
-  projects?: string[];
-}
-
-interface RawProjectConfig {
-  routes?: Record<string, string>;
-  worktrees?: Record<string, { port: number }>;
-}
-
-function readGlobalConfig(): RawGlobalConfig {
-  try {
-    if (existsSync(CONFIG_PATH)) {
-      return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as RawGlobalConfig;
-    }
-  } catch {
-    // corrupt — treat as empty
-  }
-  return {};
-}
-
-function writeGlobalConfig(cfg: RawGlobalConfig): void {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
-}
-
-function readProjectConfig(projectPath: string): RawProjectConfig | null {
-  const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
-  try {
-    if (existsSync(configPath)) {
-      return JSON.parse(readFileSync(configPath, "utf-8")) as RawProjectConfig;
-    }
-  } catch {
-    // corrupt
-  }
-  return null;
-}
-
-function ExitOnRender() {
-  const { exit } = useApp();
-  useState(() => {
-    setTimeout(exit, 0);
-  });
-  return null;
-}
+import { Box, Text, render } from "ink";
+import {
+  PROJECT_CONFIG_NAME,
+  readGlobalConfig,
+  writeGlobalConfig,
+  readProjectConfig,
+} from "../cli/config-io.js";
+import {
+  Header,
+  Row,
+  SuccessMessage,
+  ErrorMessage,
+  ExitOnRender,
+} from "../cli/output.js";
 
 // ── List projects ────────────────────────────────────────────
 
@@ -81,8 +37,8 @@ function ProjectList() {
       <Header text="Registered Projects" />
       {projects.map((p) => {
         const pc = readProjectConfig(p);
-        const routeCount = pc ? Object.keys(pc.routes ?? {}).length : 0;
-        const worktreeCount = pc ? Object.keys(pc.worktrees ?? {}).length : 0;
+        const routeCount = Object.keys(pc.routes ?? {}).length;
+        const worktreeCount = Object.keys(pc.worktrees ?? {}).length;
         return (
           <Row
             key={p}

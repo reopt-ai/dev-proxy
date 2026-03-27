@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { Box, Text, render, useApp } from "ink";
+import { Box, Text, render } from "ink";
 import { config } from "../proxy/config.js";
-import { Header, Section, Row, RouteRow } from "../cli/output.js";
+import { Header, Section, Row, RouteRow, ExitOnRender } from "../cli/output.js";
 
 function formatTarget(target: string): string {
   try {
@@ -13,14 +12,6 @@ function formatTarget(target: string): string {
     // not a URL, return as-is
   }
   return target;
-}
-
-function ExitOnRender() {
-  const { exit } = useApp();
-  useState(() => {
-    setTimeout(exit, 0);
-  });
-  return null;
 }
 
 function Status() {

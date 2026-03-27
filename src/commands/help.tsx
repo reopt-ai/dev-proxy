@@ -1,13 +1,5 @@
-import { useState } from "react";
-import { Box, Text, render, useApp } from "ink";
-
-function ExitOnRender() {
-  const { exit } = useApp();
-  useState(() => {
-    setTimeout(exit, 0);
-  });
-  return null;
-}
+import { Box, Text, render } from "ink";
+import { ExitOnRender } from "../cli/output.js";
 
 function Help() {
   return (

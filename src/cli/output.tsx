@@ -1,4 +1,5 @@
-import { Box, Text } from "ink";
+import { useState } from "react";
+import { Box, Text, useApp } from "ink";
 
 const DIVIDER = "─".repeat(44);
 
@@ -108,4 +109,12 @@ export function SuccessMessage({ message }: { message: string }) {
       <Text>{` ${message}`}</Text>
     </Text>
   );
+}
+
+export function ExitOnRender() {
+  const { exit } = useApp();
+  useState(() => {
+    setTimeout(exit, 0);
+  });
+  return null;
 }
