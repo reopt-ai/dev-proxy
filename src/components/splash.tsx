@@ -71,13 +71,26 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
                 <Text color={palette.dim}>WORKTREES</Text>
               </Box>
               <Box flexDirection="column" marginTop={1}>
-                {wts.map(([branch, { port }]) => (
-                  <Box key={branch} gap={1}>
-                    <Text color={palette.accent}>{branch.padEnd(14)}</Text>
-                    <Text color={palette.muted}>{`:${port}`.padEnd(6)}</Text>
-                    <Text color={palette.dim}>{`${branch}--*.${DOMAIN}`}</Text>
-                  </Box>
-                ))}
+                {wts.map(([branch, entry]) => {
+                  let portLabel: string;
+                  if ("ports" in entry) {
+                    const vals = Object.values(entry.ports);
+                    const first = vals[0]!;
+                    portLabel =
+                      vals.length > 1
+                        ? `:${first} +${vals.length - 1} more`
+                        : `:${first}`;
+                  } else {
+                    portLabel = `:${entry.port}`;
+                  }
+                  return (
+                    <Box key={branch} gap={1}>
+                      <Text color={palette.accent}>{branch.padEnd(14)}</Text>
+                      <Text color={palette.muted}>{portLabel.padEnd(6)}</Text>
+                      <Text color={palette.dim}>{`${branch}--*.${DOMAIN}`}</Text>
+                    </Box>
+                  );
+                })}
               </Box>
             </>
           );

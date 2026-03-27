@@ -16,14 +16,17 @@ function formatTarget(target: string): string {
 
 function Status() {
   const allRoutes: { sub: string; target: string }[] = [];
-  const allWorktrees: { name: string; port: number }[] = [];
+  const allWorktrees: {
+    name: string;
+    entry: { ports: Record<string, number> } | { port: number };
+  }[] = [];
 
   for (const project of config.projects) {
     for (const [sub, target] of Object.entries(project.routes)) {
       allRoutes.push({ sub, target: formatTarget(target) });
     }
     for (const [name, wt] of Object.entries(project.worktrees)) {
-      allWorktrees.push({ name, port: wt.port });
+      allWorktrees.push({ name, entry: wt });
     }
   }
 
@@ -52,9 +55,18 @@ function Status() {
       </Section>
 
       <Section title={`Worktrees (${String(allWorktrees.length)})`}>
-        {allWorktrees.map((w) => (
-          <RouteRow key={w.name} sub={w.name} target={`:${String(w.port)}`} />
-        ))}
+        {allWorktrees.map((w) =>
+          "ports" in w.entry ? (
+            <Box key={w.name} flexDirection="column">
+              <Text bold>{`    ${w.name}`}</Text>
+              {Object.entries(w.entry.ports).map(([svc, p]) => (
+                <RouteRow key={svc} sub={`  ${svc}`} target={`:${String(p)}`} />
+              ))}
+            </Box>
+          ) : (
+            <RouteRow key={w.name} sub={w.name} target={`:${String(w.entry.port)}`} />
+          ),
+        )}
       </Section>
     </Box>
   );

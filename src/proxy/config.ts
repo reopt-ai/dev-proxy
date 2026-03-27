@@ -19,17 +19,20 @@ interface RawGlobalConfig {
   projects?: string[];
 }
 
+/** Worktree entry: multi-service or legacy single-port */
+type WorktreeEntry = { ports: Record<string, number> } | { port: number };
+
 /** Raw shape of <project>/.dev-proxy.json */
 interface RawProjectConfig {
   routes?: Record<string, string>;
-  worktrees?: Record<string, { port: number }>;
+  worktrees?: Record<string, WorktreeEntry>;
 }
 
 export interface ProjectConfig {
   path: string;
   configPath: string;
   routes: Record<string, string>;
-  worktrees: Record<string, { port: number }>;
+  worktrees: Record<string, WorktreeEntry>;
 }
 
 export interface ResolvedConfig {

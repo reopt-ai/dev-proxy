@@ -134,15 +134,26 @@ dev-proxy supports git worktree-based dynamic routing. When you use `branch--app
 
 **Automatic lifecycle management:**
 
-Add `worktreeConfig` to your project's `.dev-proxy.json`:
+Add `worktreeConfig` to your project's `.dev-proxy.json`. Use `services` to define per-subdomain port mappings — dev-proxy allocates ports automatically and generates a `.env.local` file so your dev servers know which port to listen on:
 
 ```json
 {
-  "routes": { "www": "http://localhost:3001", "*": "http://localhost:3001" },
-  "worktrees": { "main": { "port": 3001 } },
+  "routes": {
+    "www": "http://localhost:3001",
+    "data": "http://localhost:4001",
+    "*": "http://localhost:3001"
+  },
+  "worktrees": {
+    "main": { "ports": { "www": 3001, "data": 4001 } }
+  },
   "worktreeConfig": {
-    "portRange": [4001, 5000],
+    "portRange": [4101, 5000],
     "directory": "../myproject-{branch}",
+    "services": {
+      "www": { "env": "PORT" },
+      "data": { "env": "DATA_PORT" }
+    },
+    "envFile": ".env.local",
     "hooks": {
       "post-create": "pnpm install",
       "post-remove": "echo cleanup done"
@@ -155,22 +166,26 @@ Then create and destroy worktrees with a single command:
 
 ```bash
 dev-proxy worktree create feature-auth
-# → git worktree add, auto port allocation, runs post-create hook
+# → git worktree add
+# → allocates ports: www=4101, data=4102
+# → writes .env.local: PORT=4101, DATA_PORT=4102
+# → runs post-create hook (pnpm install)
 
 dev-proxy worktree destroy feature-auth
-# → runs post-remove hook, git worktree remove, releases port
+# → runs post-remove hook, git worktree remove, releases ports
 ```
 
 **How routing works:**
 
-- Access `feature-auth--www.example.dev:3000` and it routes to the allocated port
-- The config file is watched live — routing updates instantly on changes
+- `feature-auth--www.example.dev:3000` → routes to port 4101 (www service)
+- `feature-auth--data.example.dev:3000` → routes to port 4102 (data service)
+- Config file is watched live — routing updates instantly on changes
 - Unregistered worktrees show an offline error page instead of silently falling back
 
 **Manual mode** (without `worktreeConfig`):
 
 ```bash
-dev-proxy worktree add feature-auth 4001    # Register only (no git operations)
+dev-proxy worktree add feature-auth 4001    # Register single port (no git operations)
 dev-proxy worktree remove feature-auth      # Unregister only
 ```
 

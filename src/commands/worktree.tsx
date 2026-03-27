@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Box, Text, render } from "ink";
 import {
@@ -6,7 +7,10 @@ import {
   readProjectConfig,
   writeProjectConfig,
   isValidPort,
-  allocatePort,
+  allocatePorts,
+  getEntryPorts,
+  generateEnvContent,
+  type WorktreeEntry,
 } from "../cli/config-io.js";
 import {
   Header,
@@ -33,11 +37,11 @@ function WorktreeList() {
   const cfg = readGlobalConfig();
   const projects = cfg.projects ?? [];
 
-  const entries: { project: string; name: string; port: number }[] = [];
+  const entries: { project: string; name: string; entry: WorktreeEntry }[] = [];
   for (const p of projects) {
     const pc = readProjectConfig(p);
-    for (const [name, wt] of Object.entries(pc.worktrees ?? {})) {
-      entries.push({ project: p, name, port: wt.port });
+    for (const [name, entry] of Object.entries(pc.worktrees ?? {})) {
+      entries.push({ project: p, name, entry });
     }
   }
 
@@ -51,6 +55,15 @@ function WorktreeList() {
     );
   }
 
+  function formatPorts(entry: WorktreeEntry): string {
+    if ("ports" in entry) {
+      return Object.entries(entry.ports)
+        .map(([svc, p]) => `${svc}:${p}`)
+        .join(", ");
+    }
+    return `port ${entry.port}`;
+  }
+
   return (
     <Box flexDirection="column">
       <ExitOnRender />
@@ -59,7 +72,7 @@ function WorktreeList() {
         <Row
           key={`${e.project}:${e.name}`}
           label={e.name}
-          value={`port ${e.port}  (${e.project})`}
+          value={`${formatPorts(e.entry)}  (${e.project})`}
           pad={20}
         />
       ))}
@@ -179,20 +192,31 @@ function WorktreeCreate({ branch }: { branch: string }) {
   const worktrees = cfg.worktrees ?? {};
 
   if (branch in worktrees) {
+    const existing = worktrees[branch]!;
+    const portInfo =
+      "ports" in existing
+        ? Object.entries(existing.ports)
+            .map(([s, p]) => `${s}:${p}`)
+            .join(", ")
+        : `port ${existing.port}`;
     return (
       <Box flexDirection="column">
         <ExitOnRender />
-        <ErrorMessage
-          message={`Worktree "${branch}" already exists (port ${worktrees[branch]!.port})`}
-        />
+        <ErrorMessage message={`Worktree "${branch}" already exists (${portInfo})`} />
       </Box>
     );
   }
 
-  // Allocate port
-  const usedPorts = new Set(Object.values(worktrees).map((w) => w.port));
-  const port = allocatePort(wtConfig.portRange, usedPorts);
-  if (port === null) {
+  // Collect used ports across all existing worktrees
+  const usedPorts = new Set(Object.values(worktrees).flatMap((w) => getEntryPorts(w)));
+
+  // Allocate ports — multi-service or single
+  const services = wtConfig.services;
+  const serviceNames = services ? Object.keys(services) : null;
+  const portCount = serviceNames ? serviceNames.length : 1;
+
+  const allocated = allocatePorts(portCount, wtConfig.portRange, usedPorts);
+  if (allocated === null) {
     return (
       <Box flexDirection="column">
         <ExitOnRender />
@@ -202,6 +226,19 @@ function WorktreeCreate({ branch }: { branch: string }) {
         />
       </Box>
     );
+  }
+
+  // Build the worktree entry
+  let worktreeEntry: WorktreeEntry;
+  let portsMap: Record<string, number> | null = null;
+  if (serviceNames) {
+    portsMap = {};
+    for (let i = 0; i < serviceNames.length; i++) {
+      portsMap[serviceNames[i]!] = allocated[i]!;
+    }
+    worktreeEntry = { ports: portsMap };
+  } else {
+    worktreeEntry = { port: allocated[0]! };
   }
 
   // Resolve directory
@@ -231,9 +268,24 @@ function WorktreeCreate({ branch }: { branch: string }) {
   }
 
   // Update config
-  cfg.worktrees = { ...worktrees, [branch]: { port } };
+  cfg.worktrees = { ...worktrees, [branch]: worktreeEntry };
   writeProjectConfig(projectPath, cfg);
-  messages.push(`Allocated port ${port}`);
+
+  if (portsMap) {
+    for (const [svc, p] of Object.entries(portsMap)) {
+      messages.push(`Allocated port ${p} for ${svc}`);
+    }
+  } else {
+    messages.push(`Allocated port ${allocated[0]}`);
+  }
+
+  // Generate .env file for multi-service worktrees
+  if (services && portsMap) {
+    const envContent = generateEnvContent(services, portsMap);
+    const envFile = wtConfig.envFile ?? ".env.local";
+    writeFileSync(resolve(worktreeDir, envFile), envContent);
+    messages.push(`Wrote ${envFile}`);
+  }
 
   // Run post-create hook
   const hook = wtConfig.hooks?.["post-create"];
@@ -333,10 +385,19 @@ function WorktreeDestroy({ branch }: { branch: string }) {
   }
 
   // Update config
+  const removed = worktrees[branch]!;
   const { [branch]: _, ...remaining } = worktrees;
   cfg.worktrees = remaining;
   writeProjectConfig(projectPath, cfg);
-  messages.push(`Released port ${worktrees[branch]!.port}`);
+
+  const releasedPorts = getEntryPorts(removed);
+  if ("ports" in removed) {
+    for (const [svc, p] of Object.entries(removed.ports)) {
+      messages.push(`Released port ${p} (${svc})`);
+    }
+  } else {
+    messages.push(`Released port ${releasedPorts[0]}`);
+  }
 
   return (
     <Box flexDirection="column">

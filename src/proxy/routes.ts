@@ -78,7 +78,7 @@ export function parseHost(host: string): {
 export function getTarget(host: string): TargetResult {
   const { app, worktree } = parseHost(host);
   if (worktree) {
-    const target = getWorktreeTarget(worktree);
+    const target = getWorktreeTarget(worktree, app);
     return { url: target, worktree };
   }
   return { url: parsedRoutes.get(app) ?? wildcardTarget, worktree: null };

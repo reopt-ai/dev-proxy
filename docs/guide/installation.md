@@ -26,7 +26,10 @@ Ask the user these questions. Do not assume defaults without asking.
 3. **Routes** — Which subdomains should map to which local ports?
    - Example: `www` → `3001`, `api` → `4000`, `admin` → `3002`
 4. **Default port** — Should unmatched subdomains fall back to a port? (optional, becomes `"*"` wildcard)
-5. **Worktree support** — Does the project use git worktrees? If yes, ask for a port range (e.g., `4001-5000`) and directory pattern (e.g., `../myproject-{branch}`).
+5. **Worktree support** — Does the project use git worktrees? If yes, ask:
+   - Port range for worktree allocation (e.g., `4101-5000`)
+   - Directory pattern (e.g., `../myproject-{branch}`)
+   - For each service/subdomain in routes: what env variable name does the app use for its port? (e.g., `www` uses `PORT`, `data` uses `DATA_PORT`)
 
 ## Step 3: Create Global Config
 
@@ -70,15 +73,20 @@ Build the content from the user's answers. All values below are examples — rep
 
 Only include the `"*"` entry if the user provided a default port in Step 2.
 
-If the user wants worktree support, also add `worktreeConfig` (this goes in the same `.dev-proxy.json` file, not a separate file):
+If the user wants worktree support, also add `worktreeConfig` (this goes in the same `.dev-proxy.json` file, not a separate file). The `services` field maps each subdomain to the env variable name the app reads for its port:
 
 ```json
 {
   "routes": { "...": "..." },
   "worktrees": {},
   "worktreeConfig": {
-    "portRange": [4001, 5000],
+    "portRange": [4101, 5000],
     "directory": "../<project-name>-{branch}",
+    "services": {
+      "www": { "env": "PORT" },
+      "data": { "env": "DATA_PORT" }
+    },
+    "envFile": ".env.local",
     "hooks": {
       "post-create": "<install command, e.g. pnpm install>",
       "post-remove": "echo cleanup"
@@ -86,6 +94,12 @@ If the user wants worktree support, also add `worktreeConfig` (this goes in the 
   }
 }
 ```
+
+When `dev-proxy worktree create <branch>` runs, it:
+
+1. Allocates one port per service from `portRange`
+2. Writes the env file (e.g., `.env.local`) with the port assignments: `PORT=4101`, `DATA_PORT=4102`
+3. The app reads `.env.local` to know which port to listen on — works with Next.js, Vite, and most Node.js frameworks
 
 The `{branch}` placeholder in `directory` is replaced with the branch name at runtime.
 

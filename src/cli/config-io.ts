@@ -36,6 +36,38 @@ export function writeGlobalConfig(cfg: RawGlobalConfig): void {
   writeFileSync(GLOBAL_CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
 }
 
+// ── Worktree entry types ─────────────────────────────────────
+
+/** Multi-service worktree: subdomain → port */
+export interface WorktreeMultiEntry {
+  ports: Record<string, number>;
+}
+
+/** Legacy single-port worktree */
+export interface WorktreeSingleEntry {
+  port: number;
+}
+
+export type WorktreeEntry = WorktreeMultiEntry | WorktreeSingleEntry;
+
+/** Extract all ports from a worktree entry */
+export function getEntryPorts(entry: WorktreeEntry): number[] {
+  if ("ports" in entry) return Object.values(entry.ports);
+  return [entry.port];
+}
+
+/** Get port for a specific service, with legacy fallback */
+export function getServicePort(entry: WorktreeEntry, service?: string): number | null {
+  if ("ports" in entry) {
+    if (service && service in entry.ports) return entry.ports[service]!;
+    // Fallback: first port
+    const values = Object.values(entry.ports);
+    return values[0] ?? null;
+  }
+  // Legacy single port
+  return entry.port;
+}
+
 // ── Project config I/O ───────────────────────────────────────
 
 export interface WorktreeHooks {
@@ -43,15 +75,19 @@ export interface WorktreeHooks {
   "post-remove"?: string;
 }
 
+export type WorktreeServices = Record<string, { env: string }>;
+
 export interface WorktreeConfig {
   portRange: [number, number];
   directory: string;
+  services?: WorktreeServices;
+  envFile?: string;
   hooks?: WorktreeHooks;
 }
 
 export interface RawProjectConfig {
   routes?: Record<string, string>;
-  worktrees?: Record<string, { port: number }>;
+  worktrees?: Record<string, WorktreeEntry>;
   worktreeConfig?: WorktreeConfig;
 }
 
@@ -88,4 +124,32 @@ export function allocatePort(
     if (!usedPorts.has(p)) return p;
   }
   return null;
+}
+
+export function allocatePorts(
+  count: number,
+  portRange: [number, number],
+  usedPorts: Set<number>,
+): number[] | null {
+  const result: number[] = [];
+  for (let p = portRange[0]; p <= portRange[1] && result.length < count; p++) {
+    if (!usedPorts.has(p)) result.push(p);
+  }
+  return result.length === count ? result : null;
+}
+
+// ── Env file generation ──────────────────────────────────────
+
+export function generateEnvContent(
+  services: WorktreeServices,
+  ports: Record<string, number>,
+): string {
+  const lines: string[] = [];
+  for (const [subdomain, { env }] of Object.entries(services)) {
+    const port = ports[subdomain];
+    if (port !== undefined) {
+      lines.push(`${env}=${port}`);
+    }
+  }
+  return lines.join("\n") + "\n";
 }
