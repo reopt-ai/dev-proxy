@@ -46,18 +46,22 @@ dev-proxy is:
 
 ## Quick Start
 
+### For Humans
+
 ```bash
-# 1. Install
 npm install -g @reopt-ai/dev-proxy
-
-# 2. Interactive setup
 dev-proxy init
-
-# 3. Run
 dev-proxy
 ```
 
 Press **Enter** to arm the inspector, then open `http://www.example.dev:3000` in your browser.
+
+### For LLM Agents
+
+Paste this to your AI coding agent (Claude Code, Cursor, Copilot, etc.):
+
+> Install and configure dev-proxy by following the instructions here:
+> https://raw.githubusercontent.com/reopt-ai/dev-proxy/main/docs/guide/installation.md
 
 ## Install
 

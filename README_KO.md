@@ -46,18 +46,22 @@ dev-proxy는:
 
 ## 빠른 시작
 
+### 사람용
+
 ```bash
-# 1. 설치
 npm install -g @reopt-ai/dev-proxy
-
-# 2. 인터랙티브 설정
 dev-proxy init
-
-# 3. 실행
 dev-proxy
 ```
 
 **Enter**를 눌러 인스펙터를 활성화한 뒤, 브라우저에서 `http://www.example.dev:3000`을 열어보세요.
+
+### LLM 에이전트용
+
+AI 코딩 에이전트(Claude Code, Cursor, Copilot 등)에 이 프롬프트를 붙여넣으세요:
+
+> Install and configure dev-proxy by following the instructions here:
+> https://raw.githubusercontent.com/reopt-ai/dev-proxy/main/docs/guide/installation.md
 
 ## 설치
 
