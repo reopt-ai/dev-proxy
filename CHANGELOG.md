@@ -13,7 +13,10 @@ Initial open-source release.
 - Error-only mode
 - URL/method search filtering
 - Request replay and curl copy to clipboard
+- Worktree lifecycle management: `worktree create/destroy` with auto port allocation and hooks
 - Worktree-based dynamic routing (`branch--app.domain`)
+- Full CLI: `init`, `status`, `doctor`, `config`, `project`, `worktree`, `--help`, `--version`
+- LLM agent installation guide (`docs/guide/installation.md`)
 - Auto-generated TLS certificates via mkcert
 - Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`.dev-proxy.json`)
 - Wildcard route (`"*"`) for unmatched subdomain fallback
