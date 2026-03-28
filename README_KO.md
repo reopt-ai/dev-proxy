@@ -337,9 +337,10 @@ src/
 │   ├── worktree.tsx       # 워크트리 관리
 │   ├── help.tsx           # 도움말
 │   └── version.tsx        # 버전
+├── bootstrap.ts           # 시작 부트스트래퍼 (설정 로드, 프록시 초기화)
 ├── cli/                   # 공용 CLI 컴포넌트
-│   ├── output.tsx         # 출력 컴포넌트 (Header, Section, Check 등)
-│   └── prompt.tsx         # 입력 컴포넌트 (TextPrompt, Confirm)
+│   ├── config-io.ts       # 설정 I/O 헬퍼 및 포트 할당
+│   └── output.tsx         # 출력 컴포넌트 (Header, Section, Check 등)
 ├── proxy/
 │   ├── config.ts          # 설정 로더 (~/.dev-proxy + .dev-proxy.json)
 │   ├── server.ts          # HTTP/WS 리버스 프록시

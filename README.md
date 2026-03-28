@@ -337,9 +337,10 @@ src/
 │   ├── worktree.tsx       # Worktree management
 │   ├── help.tsx           # Help output
 │   └── version.tsx        # Version output
+├── bootstrap.ts           # Startup bootstrapper (config load, proxy init)
 ├── cli/                   # Shared CLI components
-│   ├── output.tsx         # Display components (Header, Section, Check, etc.)
-│   └── prompt.tsx         # Input components (TextPrompt, Confirm)
+│   ├── config-io.ts       # Config I/O helpers and port allocation
+│   └── output.tsx         # Display components (Header, Section, Check, etc.)
 ├── proxy/
 │   ├── config.ts          # Config loader (~/.dev-proxy + .dev-proxy.json)
 │   ├── server.ts          # HTTP/WS reverse proxy
