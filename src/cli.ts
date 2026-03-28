@@ -1,3 +1,12 @@
+export const KNOWN_COMMANDS = [
+  "init",
+  "status",
+  "doctor",
+  "config",
+  "project",
+  "worktree",
+];
+
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -31,8 +40,7 @@ if (args.includes("--help") || args.includes("-h")) {
       break;
     default: {
       // Unknown command — suggest closest match
-      const known = ["init", "status", "doctor", "config", "project", "worktree"];
-      const suggestion = closest(command, known);
+      const suggestion = closest(command, KNOWN_COMMANDS);
       console.error(`\n  \x1b[31m\u2717\x1b[0m Unknown command: ${command}`);
       if (suggestion) {
         console.error(`\n  Did you mean \x1b[36m${suggestion}\x1b[0m?`);
@@ -43,7 +51,7 @@ if (args.includes("--help") || args.includes("-h")) {
   }
 }
 
-function closest(input: string, candidates: string[]): string | null {
+export function closest(input: string, candidates: string[]): string | null {
   let best: string | null = null;
   let bestDist = Infinity;
   for (const c of candidates) {
@@ -56,7 +64,7 @@ function closest(input: string, candidates: string[]): string | null {
   return best;
 }
 
-function levenshtein(a: string, b: string): number {
+export function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
   const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
