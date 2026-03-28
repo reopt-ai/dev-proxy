@@ -257,6 +257,7 @@ function InitWizard() {
       execFileSync("which", ["mkcert"], { stdio: "ignore" });
       return true;
     } catch {
+      // Expected: mkcert is simply not installed
       return false;
     }
   })();

@@ -97,6 +97,7 @@ function resolveReplayTarget(
       port: origin.port ? Number(origin.port) : defaultPort,
     };
   } catch {
+    // Malformed URL — fall back to manual host parsing
     return {
       hostname: info.host.split(":")[0] ?? "localhost",
       port: defaultPort,

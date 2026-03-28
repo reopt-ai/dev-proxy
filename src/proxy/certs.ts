@@ -14,6 +14,7 @@ function hasMkcert(): boolean {
     execSync("which mkcert", { stdio: "ignore" });
     return true;
   } catch {
+    // Expected: mkcert is simply not installed
     return false;
   }
 }

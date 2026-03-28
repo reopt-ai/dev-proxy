@@ -61,6 +61,7 @@ function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEn
     const data = JSON.parse(raw) as { worktrees?: Record<string, WorktreeEntry> };
     return data.worktrees ?? {};
   } catch {
+    // Config read/parse failed — fall back to cached worktrees
     return project.worktrees;
   }
 }
