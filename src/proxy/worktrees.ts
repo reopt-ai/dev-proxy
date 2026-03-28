@@ -129,6 +129,8 @@ export function useWorktrees(): Map<string, WorktreeEntry> {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+export const __testing = { isValidEntry };
+
 export function stopRegistry(): void {
   for (const w of watchers) w.close();
   watchers.length = 0;

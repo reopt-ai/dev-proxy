@@ -3,11 +3,34 @@
  * Re-exports constants from proxy/config.ts and provides read/write helpers.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import { CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME } from "../proxy/config.js";
 
 export { CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME };
+
+/** Write to a temp file then atomically rename — prevents corruption on crash. */
+function atomicWriteFileSync(filePath: string, data: string): void {
+  const tmp = filePath + ".tmp";
+  writeFileSync(tmp, data, "utf-8");
+  try {
+    renameSync(tmp, filePath);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* best-effort cleanup */
+    }
+    throw err;
+  }
+}
 
 // ── Global config I/O ────────────────────────────────────────
 
@@ -35,7 +58,7 @@ export function readGlobalConfig(): RawGlobalConfig {
 
 export function writeGlobalConfig(cfg: RawGlobalConfig): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(GLOBAL_CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
+  atomicWriteFileSync(GLOBAL_CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n");
 }
 
 // ── Worktree entry types ─────────────────────────────────────
@@ -107,7 +130,7 @@ export function readProjectConfig(projectPath: string): RawProjectConfig {
 
 export function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): void {
   const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
-  writeFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
+  atomicWriteFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n");
 }
 
 // ── Validation ───────────────────────────────────────────────

@@ -118,3 +118,8 @@ function loadConfig(): ResolvedConfig {
 }
 
 export const config = loadConfig();
+
+export const __testing = {
+  parsePort,
+  resolveFilePath,
+};

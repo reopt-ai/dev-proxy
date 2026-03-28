@@ -7,6 +7,7 @@ import {
   readProjectConfig,
   writeProjectConfig,
   isValidPort,
+  isValidSubdomain,
   allocatePorts,
   getEntryPorts,
   generateEnvContent,
@@ -269,7 +270,11 @@ function WorktreeCreate({ branch }: { branch: string }) {
 
   // Update config
   cfg.worktrees = { ...worktrees, [branch]: worktreeEntry };
-  writeProjectConfig(projectPath, cfg);
+  try {
+    writeProjectConfig(projectPath, cfg);
+  } catch (err) {
+    warnings.push(`Failed to update config: ${(err as Error).message}`);
+  }
 
   if (portsMap) {
     for (const [svc, p] of Object.entries(portsMap)) {
@@ -283,8 +288,12 @@ function WorktreeCreate({ branch }: { branch: string }) {
   if (services && portsMap) {
     const envContent = generateEnvContent(services, portsMap);
     const envFile = wtConfig.envFile ?? ".env.local";
-    writeFileSync(resolve(worktreeDir, envFile), envContent);
-    messages.push(`Wrote ${envFile}`);
+    try {
+      writeFileSync(resolve(worktreeDir, envFile), envContent);
+      messages.push(`Wrote ${envFile}`);
+    } catch (err) {
+      warnings.push(`Failed to write ${envFile}: ${(err as Error).message}`);
+    }
   }
 
   // Run post-create hook
@@ -388,7 +397,11 @@ function WorktreeDestroy({ branch }: { branch: string }) {
   const removed = worktrees[branch]!;
   const { [branch]: _, ...remaining } = worktrees;
   cfg.worktrees = remaining;
-  writeProjectConfig(projectPath, cfg);
+  try {
+    writeProjectConfig(projectPath, cfg);
+  } catch (err) {
+    warnings.push(`Failed to update config: ${(err as Error).message}`);
+  }
 
   const releasedPorts = getEntryPorts(removed);
   if ("ports" in removed) {
@@ -425,6 +438,13 @@ if (subcommand === "create") {
   const branch = args[1];
   if (!branch) {
     render(<ErrorMessage message="Usage: dev-proxy worktree create <branch>" />);
+  } else if (!isValidSubdomain(branch)) {
+    render(
+      <ErrorMessage
+        message={`Invalid branch name "${branch}" for subdomain routing`}
+        hint="Use lowercase alphanumeric and hyphens only (e.g. fix-auth-bug)"
+      />,
+    );
   } else {
     render(<WorktreeCreate branch={branch} />);
   }
@@ -442,7 +462,14 @@ if (subcommand === "create") {
     render(<ErrorMessage message="Usage: dev-proxy worktree add <name> <port>" />);
   } else {
     const port = Number(portStr);
-    if (!isValidPort(port)) {
+    if (!isValidSubdomain(name)) {
+      render(
+        <ErrorMessage
+          message={`Invalid worktree name "${name}"`}
+          hint="Use lowercase alphanumeric and hyphens only"
+        />,
+      );
+    } else if (!isValidPort(port)) {
       render(
         <ErrorMessage
           message={`Invalid port "${portStr}"`}

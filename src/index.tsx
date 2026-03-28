@@ -1,7 +1,7 @@
 process.title = "dev-proxy";
 
 import { render } from "ink";
-import { createProxyServer, startProxyServer } from "./proxy/server.js";
+import { createProxyServer, startProxyServer, destroyAgents } from "./proxy/server.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
 import { pushHttp, pushWs } from "./store.js";
 import { App } from "./components/app.js";
@@ -132,6 +132,7 @@ function shutdown(code = 0) {
   } catch {
     /* ignored: best-effort cleanup */
   }
+  destroyAgents();
   // Drain any buffered frame before leaving alternate screen
   flushBufferedFrame();
   restoreTerminal();

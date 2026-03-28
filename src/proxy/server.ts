@@ -12,6 +12,7 @@ import { isDetailActive } from "../store.js";
 // Keep-Alive agent — reuses TCP connections to target servers
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64 });
 // Dev targets frequently use self-signed certs; keep the proxy permissive.
+// This only affects outbound connections to LOCAL dev servers, never public internet.
 const httpsAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 64,
@@ -22,6 +23,14 @@ const httpsAgent = new https.Agent({
 let _nextId = 0;
 function nextId(): string {
   return String(++_nextId);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function worktreeErrorPage(worktree: string, target: URL, error: string): string {
@@ -35,10 +44,10 @@ function worktreeErrorPage(worktree: string, target: URL, error: string): string
   .dim{color:#888;font-size:0.85rem}
 </style></head>
 <body><div class="card">
-  <h1>Worktree "${worktree}" is offline</h1>
-  <p>Target <strong>${target.origin}</strong> is not responding.</p>
-  <code>cd worktree-${worktree} && pnpm dev</code>
-  <p class="dim">${error}</p>
+  <h1>Worktree &ldquo;${escapeHtml(worktree)}&rdquo; is offline</h1>
+  <p>Target <strong>${escapeHtml(target.origin)}</strong> is not responding.</p>
+  <code>cd worktree-${escapeHtml(worktree)} && pnpm dev</code>
+  <p class="dim">${escapeHtml(error)}</p>
 </div></body></html>`;
 }
 
@@ -187,9 +196,12 @@ function createRequestHandler(
 
     emitter.emit("request", event);
 
-    // Inject forwarding headers directly — avoids object spread copy
+    // Strip any client-supplied forwarding headers, then set ours
     const headers = clientReq.headers;
-    headers["x-forwarded-for"] = clientReq.socket.remoteAddress ?? "";
+    delete headers["x-forwarded-for"];
+    delete headers["x-forwarded-host"];
+    delete headers["x-forwarded-proto"];
+    headers["x-forwarded-for"] = clientReq.socket.remoteAddress ?? "127.0.0.1";
     headers["x-forwarded-host"] = host;
     headers["x-forwarded-proto"] = proto;
     // Rewrite Host so Next.js proxy.ts middleware sees the original subdomain
@@ -219,6 +231,18 @@ function createRequestHandler(
           event.responseHeaders = collectDetail ? headersToRecord(proxyRes.headers) : {};
           event.responseSize = responseSize;
           emitter.emit("request:complete", event);
+        });
+        proxyRes.on("error", (err) => {
+          event.error = err.message;
+          event.duration = Math.round(performance.now() - start);
+          emitter.emit("request:error", event);
+          if (!clientRes.headersSent) clientRes.writeHead(502);
+          clientRes.end();
+        });
+
+        clientRes.on("error", () => {
+          // Client disconnected — best-effort, nothing to do
+          proxyRes.destroy();
         });
 
         clientRes.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
@@ -316,7 +340,9 @@ function createUpgradeHandler(
           reqHeaders.push(`${key}: ${Array.isArray(value) ? value.join(", ") : value}`);
         }
       }
-      reqHeaders.push(`x-forwarded-for: ${clientReq.socket.remoteAddress ?? ""}`);
+      reqHeaders.push(
+        `x-forwarded-for: ${clientReq.socket.remoteAddress ?? "127.0.0.1"}`,
+      );
       reqHeaders.push(`x-forwarded-host: ${clientReq.headers.host ?? ""}`);
       reqHeaders.push(`x-forwarded-proto: ${proto}`);
       proxySocket.write(reqHeaders.join("\r\n") + "\r\n\r\n");
@@ -384,6 +410,12 @@ export function createProxyServer(): {
   return { server, httpsServer, emitter };
 }
 
+/** Destroy keep-alive agents to close lingering sockets on shutdown. */
+export function destroyAgents(): void {
+  httpAgent.destroy();
+  httpsAgent.destroy();
+}
+
 export function startProxyServer(
   server: http.Server,
   httpsServer: https.Server | null,
@@ -426,3 +458,13 @@ export function startProxyServer(
     });
   });
 }
+
+export const __testing = {
+  escapeHtml,
+  parseCookies,
+  parseQuery,
+  headersToRecord,
+  formatListenError,
+  normalizeTargetProtocol,
+  targetPort,
+};

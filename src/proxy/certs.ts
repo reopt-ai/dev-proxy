@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { constants } from "node:fs";
 import path from "node:path";
 import { execFileSync, execSync } from "node:child_process";
 import { config, CONFIG_DIR } from "./config.js";
@@ -67,7 +68,15 @@ export function resolveCerts(
       { stdio: "inherit" },
     );
 
-    console.log("[dev-proxy] TLS certificates generated with mkcert");
+    // Restrict cert file permissions to owner-only (0600)
+    try {
+      fs.chmodSync(DEFAULT_CERT, constants.S_IRUSR | constants.S_IWUSR);
+      fs.chmodSync(DEFAULT_KEY, constants.S_IRUSR | constants.S_IWUSR);
+    } catch {
+      // Non-fatal: best-effort permission tightening
+    }
+
+    console.warn("[dev-proxy] TLS certificates generated with mkcert");
     return { certPath: DEFAULT_CERT, keyPath: DEFAULT_KEY };
   } catch (err) {
     console.error(

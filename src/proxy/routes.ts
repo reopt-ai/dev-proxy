@@ -68,7 +68,9 @@ export function parseHost(host: string): {
   app: string;
   worktree: string | null;
 } {
-  const subdomain = host.split(".")[0] ?? host;
+  // Strip port number before parsing (HTTP Host header may include :port)
+  const hostOnly = host.replace(/:\d+$/, "").toLowerCase();
+  const subdomain = hostOnly.split(".")[0] ?? hostOnly;
   const delimIdx = subdomain.indexOf("--");
   if (delimIdx !== -1) {
     return {

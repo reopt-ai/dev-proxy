@@ -149,6 +149,44 @@ function splitEventSlimOnly(event: ProxyRequestEvent): SlimRequestEvent {
   return slim;
 }
 
+/** Evict oldest events when over capacity. Noise is evicted first, then oldest non-noise. */
+function evictExcess() {
+  if (events.length <= MAX_EVENTS) return;
+  const excess = events.length - MAX_EVENTS;
+  const removeIds: string[] = [];
+
+  for (const e of events) {
+    if (removeIds.length >= excess) break;
+    if (isNoise(e)) removeIds.push(e.id);
+  }
+  if (removeIds.length < excess) {
+    const removeSet = new Set(removeIds);
+    for (const e of events) {
+      if (removeIds.length >= excess) break;
+      if (!removeSet.has(e.id)) removeIds.push(e.id);
+    }
+  }
+
+  const toRemove = new Set(removeIds);
+  for (const id of toRemove) {
+    detailMap.delete(id);
+    indexById.delete(id);
+    activeWsIds.delete(id);
+  }
+  // In-place compaction: avoid events.filter() + rebuild
+  let writeIdx = 0;
+  // eslint-disable-next-line @typescript-eslint/prefer-for-of -- in-place compaction needs writeIdx
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i]!;
+    if (!toRemove.has(ev.id)) {
+      events[writeIdx] = ev;
+      indexById.set(ev.id, writeIdx);
+      writeIdx++;
+    }
+  }
+  events.length = writeIdx;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
@@ -175,42 +213,7 @@ export function pushHttp(event: ProxyRequestEvent) {
   } else {
     events.push(slim);
     indexById.set(slim.id, events.length - 1);
-
-    if (events.length > MAX_EVENTS) {
-      // Evict oldest noise first, then oldest non-noise
-      const excess = events.length - MAX_EVENTS;
-      const removeIds: string[] = [];
-
-      for (const e of events) {
-        if (removeIds.length >= excess) break;
-        if (isNoise(e)) removeIds.push(e.id);
-      }
-      if (removeIds.length < excess) {
-        const removeSet = new Set(removeIds);
-        for (const e of events) {
-          if (removeIds.length >= excess) break;
-          if (!removeSet.has(e.id)) removeIds.push(e.id);
-        }
-      }
-
-      const toRemove = new Set(removeIds);
-      for (const id of toRemove) {
-        detailMap.delete(id);
-        indexById.delete(id);
-      }
-      // In-place compaction: avoid events.filter() + rebuild
-      let writeIdx = 0;
-      // eslint-disable-next-line @typescript-eslint/prefer-for-of -- in-place compaction needs writeIdx
-      for (let i = 0; i < events.length; i++) {
-        const ev = events[i]!;
-        if (!toRemove.has(ev.id)) {
-          events[writeIdx] = ev;
-          indexById.set(ev.id, writeIdx);
-          writeIdx++;
-        }
-      }
-      events.length = writeIdx;
-    }
+    evictExcess();
 
     if (followMode) {
       const filtered = filteredEvents();
@@ -274,38 +277,7 @@ export function pushWs(event: ProxyWsEvent) {
   } else {
     events.push(slimWs);
     indexById.set(slimWs.id, events.length - 1);
-
-    if (events.length > MAX_EVENTS) {
-      const excess = events.length - MAX_EVENTS;
-      const removeIds: string[] = [];
-      for (const e of events) {
-        if (removeIds.length >= excess) break;
-        if (isNoise(e)) removeIds.push(e.id);
-      }
-      if (removeIds.length < excess) {
-        const removeSet = new Set(removeIds);
-        for (const e of events) {
-          if (removeIds.length >= excess) break;
-          if (!removeSet.has(e.id)) removeIds.push(e.id);
-        }
-      }
-      const toRemove = new Set(removeIds);
-      for (const id of toRemove) {
-        detailMap.delete(id);
-        indexById.delete(id);
-      }
-      let writeIdx = 0;
-      // eslint-disable-next-line @typescript-eslint/prefer-for-of -- in-place compaction needs writeIdx
-      for (let i = 0; i < events.length; i++) {
-        const ev = events[i]!;
-        if (!toRemove.has(ev.id)) {
-          events[writeIdx] = ev;
-          indexById.set(ev.id, writeIdx);
-          writeIdx++;
-        }
-      }
-      events.length = writeIdx;
-    }
+    evictExcess();
 
     if (followMode) {
       const filtered = filteredEvents();

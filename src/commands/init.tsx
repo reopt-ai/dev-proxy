@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { render, Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
 import { platform } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -11,7 +11,9 @@ import {
   PROJECT_CONFIG_NAME,
   isValidPort,
   isValidSubdomain,
-  type RawGlobalConfig,
+  readGlobalConfig,
+  writeGlobalConfig,
+  writeProjectConfig,
 } from "../cli/config-io.js";
 import { ExitOnRender } from "../cli/output.js";
 
@@ -84,7 +86,13 @@ function RouteInput({
               );
               return;
             }
-            onAdd(sub, trimmed.slice(eq + 1).trim());
+            const portStr = trimmed.slice(eq + 1).trim();
+            const portNum = parseInt(portStr, 10);
+            if (!isValidPort(portNum)) {
+              setError(`Invalid port "${portStr}" — must be 1-65535`);
+              return;
+            }
+            onAdd(sub, portStr);
             setValue("");
             setError("");
           }}
@@ -190,10 +198,8 @@ function InitWizard() {
       httpsPort: number;
       projects: string[];
     };
+    const existing = readGlobalConfig();
     if (existsSync(GLOBAL_CONFIG_PATH)) {
-      const existing = JSON.parse(
-        readFileSync(GLOBAL_CONFIG_PATH, "utf-8"),
-      ) as RawGlobalConfig;
       globalConfig = {
         domain: existing.domain ?? domain,
         port: existing.port ?? parseInt(httpPort, 10),
@@ -216,7 +222,7 @@ function InitWizard() {
       addMessage(`Created ${GLOBAL_CONFIG_PATH}`);
     }
     try {
-      writeFileSync(GLOBAL_CONFIG_PATH, JSON.stringify(globalConfig, null, 2) + "\n");
+      writeGlobalConfig(globalConfig);
     } catch (err) {
       addMessage(`Failed to write ${GLOBAL_CONFIG_PATH}: ${(err as Error).message}`);
     }
@@ -233,10 +239,7 @@ function InitWizard() {
 
     if (!existsSync(projectConfigPath) || overwriteProject) {
       try {
-        writeFileSync(
-          projectConfigPath,
-          JSON.stringify({ routes: routeMap, worktrees: {} }, null, 2) + "\n",
-        );
+        writeProjectConfig(absPath, { routes: routeMap, worktrees: {} });
         addMessage(`Created ${projectConfigPath}`);
       } catch (err) {
         addMessage(`Failed to write ${projectConfigPath}: ${(err as Error).message}`);
