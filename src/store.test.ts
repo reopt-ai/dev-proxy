@@ -333,6 +333,27 @@ describe("dev-proxy store", () => {
     // This is verified indirectly: we have 55 events but only 50 detail entries
   });
 
+  it("cleans up activeWsIds during eviction", () => {
+    toggleHideNoise();
+
+    // Put WS event first so it's the oldest non-noise event
+    pushWs(makeWsEvent({ id: "ws-evict", url: "/ws", status: "open" }));
+
+    // Fill remaining 149 slots
+    for (let i = 0; i < 149; i++) {
+      pushHttp(makeHttpEvent({ id: `fill-${i}`, url: `/api/${i}` }));
+    }
+
+    expect(__testing.snapshot().activeWsCount).toBe(1);
+
+    // Push one more to force eviction — oldest non-noise (the WS) gets removed
+    pushHttp(makeHttpEvent({ id: "push-a", url: "/a" }));
+
+    const snapshot = __testing.snapshot();
+    expect(snapshot.events.find((e) => e.id === "ws-evict")).toBeUndefined();
+    expect(snapshot.activeWsCount).toBe(0);
+  });
+
   it("filters events by search query", () => {
     pushHttp(makeHttpEvent({ id: "r-1", url: "/api/users" }));
     pushHttp(makeHttpEvent({ id: "r-2", url: "/api/orders" }));

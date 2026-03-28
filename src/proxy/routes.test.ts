@@ -30,9 +30,16 @@ describe("parseHost", () => {
     });
   });
 
-  it("handles host with port only", () => {
+  it("strips port before parsing", () => {
     expect(parseHost("localhost:3000")).toEqual({
-      app: "localhost:3000",
+      app: "localhost",
+      worktree: null,
+    });
+  });
+
+  it("normalizes to lowercase", () => {
+    expect(parseHost("Studio.Reopt.De:3000")).toEqual({
+      app: "studio",
       worktree: null,
     });
   });
