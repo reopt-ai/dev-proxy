@@ -1,3 +1,11 @@
+## [1.1.1](https://github.com/reopt-ai/dev-proxy/compare/v1.1.0...v1.1.1) (2026-03-28)
+
+### Bug Fixes
+
+* **ci:** install semantic-release plugins as devDependencies ([9925e96](https://github.com/reopt-ai/dev-proxy/commit/9925e96eb7e8b49839982485527f666d6a1ad0ed))
+* **config:** warn on silent config failures and validate subdomain input ([3fc534a](https://github.com/reopt-ai/dev-proxy/commit/3fc534adb699679567d3d3b2a106bd06de01a96f))
+* **proxy:** production hardening — security, resilience, and correctness ([f4ff3ac](https://github.com/reopt-ai/dev-proxy/commit/f4ff3acfd3ea1d06c4eebe5735d7b0b72498b7b9))
+
 # Changelog
 
 ## 1.1.0 (2026-03-27)
