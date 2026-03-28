@@ -34,7 +34,12 @@ This runs `typecheck`, `eslint`, `prettier --check`, and `vitest` in sequence. A
 
 ## Commit Convention
 
-We use [Conventional Commits](https://www.conventionalcommits.org/). This is enforced by a `commit-msg` hook via lefthook.
+We use [Conventional Commits](https://www.conventionalcommits.org/). This is enforced by a `commit-msg` hook via lefthook. Commit types directly drive **automated releases** via [semantic-release](https://github.com/semantic-release/semantic-release):
+
+- `fix` → **patch** release (1.0.0 → 1.0.1)
+- `feat` → **minor** release (1.0.0 → 1.1.0)
+- `feat!` or `BREAKING CHANGE` footer → **major** release (1.0.0 → 2.0.0)
+- `docs`, `chore`, `ci`, `test`, `style`, `refactor` → no release
 
 ```
 <type>(<scope>): <subject>
@@ -82,6 +87,17 @@ Key principles:
 - Use `vitest` — `describe`/`it`/`expect` style
 - UI components are tested manually in terminal; core logic (store, routes, config) has unit tests
 - When fixing a bug, add a regression test first
+
+## Releases
+
+Releases are fully automated. When commits are pushed to `main`, [semantic-release](https://github.com/semantic-release/semantic-release) runs in CI and:
+
+1. Determines the next version from commit messages
+2. Updates `CHANGELOG.md` and `package.json`
+3. Publishes to npm
+4. Creates a GitHub Release with release notes
+
+**Do not** manually edit `package.json` version, create git tags, edit `CHANGELOG.md`, or run `npm publish`. The CI pipeline owns all of these.
 
 ## Reporting Issues
 
