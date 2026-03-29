@@ -1,3 +1,9 @@
+## [1.1.2](https://github.com/reopt-ai/dev-proxy/compare/v1.1.1...v1.1.2) (2026-03-29)
+
+### Bug Fixes
+
+* **test:** address remaining quality issues from audit ([2e08bf7](https://github.com/reopt-ai/dev-proxy/commit/2e08bf7f5e089191b42d8ff64c65a8cd25e37ddb))
+
 ## [1.1.1](https://github.com/reopt-ai/dev-proxy/compare/v1.1.0...v1.1.1) (2026-03-28)
 
 ### Bug Fixes
