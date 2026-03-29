@@ -88,6 +88,40 @@ Key principles:
 - UI components are tested manually in terminal; core logic (store, routes, config) has unit tests
 - When fixing a bug, add a regression test first
 
+### Writing Tests
+
+**Setup**: All tests share a global setup (`src/__test-utils__/setup.ts`) that silences `console.log/error/warn` and calls `vi.restoreAllMocks()` after each test. You don't need to add these yourself.
+
+**Mocking external modules**:
+
+```typescript
+// Define mock before imports (vi.mock is hoisted)
+vi.mock("node:fs", () => ({
+  default: { existsSync: vi.fn(), readFileSync: vi.fn() },
+  existsSync: vi.fn(),
+  readFileSync: vi.fn(),
+}));
+
+// Import after mocks
+const { myFunction } = await import("./my-module.js");
+```
+
+**Resetting mocks between tests**: Use `.mockReset()` on individual mocks in `beforeEach`. Do NOT use `vi.resetAllMocks()` or `vi.restoreAllMocks()` — the global setup handles restoration.
+
+```typescript
+beforeEach(() => {
+  fsMock.existsSync.mockReset();
+  fsMock.readFileSync.mockReset();
+});
+```
+
+**Testing internal functions**: If a module has `__testing`, import it:
+
+```typescript
+const { __testing } = await import("./module.js");
+const { internalFn } = __testing;
+```
+
 ## Releases
 
 Releases are fully automated. When commits are pushed to `main`, [semantic-release](https://github.com/semantic-release/semantic-release) runs in CI and:

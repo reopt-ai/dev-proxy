@@ -66,4 +66,14 @@ To add a new command: create `src/commands/<name>.tsx`, add case to `src/cli.ts`
 
 ## Testing
 
-Tests co-located with source: `foo.ts` → `foo.test.ts`. Store exposes `__testing` namespace for test access to internals. UI components and CLI commands are tested manually in terminal.
+Tests co-located with source: `foo.ts` → `foo.test.ts`. Global setup in `src/__test-utils__/setup.ts` handles console silencing and `vi.restoreAllMocks()` — do not repeat these in individual test files.
+
+**`__testing` convention**: Modules expose internal functions via `export const __testing = { ... }` for test access. Rules:
+
+- Stateful modules must include a `reset()` function
+- Pure-function modules export functions only
+- Never import `__testing` in production code (tree-shaken in builds)
+
+**Mock pattern**: Use `vi.mock()` with inline factory. Do not call `vi.resetAllMocks()` or `vi.restoreAllMocks()` in file-level `beforeEach` — the global setup handles cleanup. Reset individual mocks with `.mockReset()` instead.
+
+Store exposes `__testing` namespace for test access to internals. UI components and CLI commands are tested manually in terminal.
