@@ -1,7 +1,32 @@
-import { describe, expect, it, vi } from "vitest";
-import { __testing } from "./config.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { parsePort, resolveFilePath } = __testing;
+// ── Mocks ───────────────────────────────────────────────────
+// Must be set up before importing the module under test.
+
+const fsMock = {
+  existsSync: vi.fn<(p: string) => boolean>(),
+  readFileSync: vi.fn<(p: string, enc: string) => string>(),
+};
+
+vi.mock("node:fs", () => ({
+  default: fsMock,
+  ...fsMock,
+}));
+
+// Now import after mocks are in place
+const { __testing, CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME } =
+  await import("./config.js");
+
+const { parsePort, resolveFilePath, loadJson, loadProjectConfig, loadConfig } = __testing;
+
+// ── Lifecycle ──────────────────────────────────────────────
+
+beforeEach(() => {
+  fsMock.existsSync.mockReset();
+  fsMock.readFileSync.mockReset();
+});
+
+// ── Tests ──────────────────────────────────────────────────
 
 describe("parsePort", () => {
   it("returns fallback for undefined", () => {
@@ -21,46 +46,32 @@ describe("parsePort", () => {
   });
 
   it("rejects port 0 and returns fallback", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     expect(parsePort("test", 0, 3000)).toBe(3000);
-    spy.mockRestore();
   });
 
   it("rejects negative port", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     expect(parsePort("test", -1, 3000)).toBe(3000);
-    spy.mockRestore();
   });
 
   it("rejects port > 65535", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     expect(parsePort("test", 70000, 3000)).toBe(3000);
-    spy.mockRestore();
   });
 
   it("rejects non-integer", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     expect(parsePort("test", 3.14, 3000)).toBe(3000);
-    spy.mockRestore();
   });
 
   it("rejects NaN", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     expect(parsePort("test", NaN, 3000)).toBe(3000);
-    spy.mockRestore();
   });
 
   it("rejects Infinity", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     expect(parsePort("test", Infinity, 3000)).toBe(3000);
-    spy.mockRestore();
   });
 
   it("logs error with label when rejecting", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(vi.fn());
     parsePort("httpsPort", 99999, 3443);
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining("httpsPort"));
-    spy.mockRestore();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("httpsPort"));
   });
 });
 
@@ -82,5 +93,195 @@ describe("resolveFilePath", () => {
   it("resolves relative path against base directory", () => {
     const result = resolveFilePath("certs/cert.pem", "/home/user/.dev-proxy/config.json");
     expect(result).toBe("/home/user/.dev-proxy/certs/cert.pem");
+  });
+});
+
+// ── loadJson ───────────────────────────────────────────────
+
+describe("loadJson", () => {
+  it("returns parsed JSON object for valid file", () => {
+    fsMock.existsSync.mockReturnValue(true);
+    fsMock.readFileSync.mockReturnValue('{"domain":"example.dev","port":8080}');
+
+    const result = loadJson("/some/config.json");
+
+    expect(result).toEqual({ domain: "example.dev", port: 8080 });
+    expect(fsMock.existsSync).toHaveBeenCalledWith("/some/config.json");
+    expect(fsMock.readFileSync).toHaveBeenCalledWith("/some/config.json", "utf-8");
+  });
+
+  it("returns null when file does not exist", () => {
+    fsMock.existsSync.mockReturnValue(false);
+
+    const result = loadJson("/missing/config.json");
+
+    expect(result).toBeNull();
+    expect(fsMock.readFileSync).not.toHaveBeenCalled();
+  });
+
+  it("returns null and logs error for invalid JSON", () => {
+    fsMock.existsSync.mockReturnValue(true);
+    fsMock.readFileSync.mockReturnValue("{not valid json}");
+
+    const result = loadJson("/bad/config.json");
+
+    expect(result).toBeNull();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to parse /bad/config.json"),
+    );
+  });
+
+  it("returns null for empty file", () => {
+    fsMock.existsSync.mockReturnValue(true);
+    fsMock.readFileSync.mockReturnValue("");
+
+    const result = loadJson("/empty/config.json");
+
+    expect(result).toBeNull();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to parse /empty/config.json"),
+    );
+  });
+});
+
+// ── loadProjectConfig ──────────────────────────────────────
+
+describe("loadProjectConfig", () => {
+  it("returns routes and worktrees from valid .dev-proxy.json", () => {
+    const projectDir = "/projects/my-app";
+    const configPath = `${projectDir}/${PROJECT_CONFIG_NAME}`;
+    const rawConfig = {
+      routes: { app: "http://localhost:3000", api: "http://localhost:4000" },
+      worktrees: { feature: { ports: { app: 3001, api: 4001 } } },
+    };
+
+    fsMock.existsSync.mockImplementation((p: string) => p === configPath);
+    fsMock.readFileSync.mockReturnValue(JSON.stringify(rawConfig));
+
+    const result = loadProjectConfig(projectDir);
+
+    expect(result).toEqual({
+      path: projectDir,
+      configPath,
+      routes: rawConfig.routes,
+      worktrees: rawConfig.worktrees,
+    });
+  });
+
+  it("returns null when config file does not exist", () => {
+    fsMock.existsSync.mockReturnValue(false);
+
+    const result = loadProjectConfig("/projects/missing");
+
+    expect(result).toBeNull();
+  });
+
+  it("defaults missing routes to empty object", () => {
+    const projectDir = "/projects/no-routes";
+    const configPath = `${projectDir}/${PROJECT_CONFIG_NAME}`;
+
+    fsMock.existsSync.mockImplementation((p: string) => p === configPath);
+    fsMock.readFileSync.mockReturnValue(
+      JSON.stringify({ worktrees: { feat: { port: 5000 } } }),
+    );
+
+    const result = loadProjectConfig(projectDir);
+
+    expect(result).not.toBeNull();
+    expect(result!.routes).toEqual({});
+    expect(result!.worktrees).toEqual({ feat: { port: 5000 } });
+  });
+
+  it("defaults missing worktrees to empty object", () => {
+    const projectDir = "/projects/no-worktrees";
+    const configPath = `${projectDir}/${PROJECT_CONFIG_NAME}`;
+
+    fsMock.existsSync.mockImplementation((p: string) => p === configPath);
+    fsMock.readFileSync.mockReturnValue(
+      JSON.stringify({ routes: { web: "http://localhost:3000" } }),
+    );
+
+    const result = loadProjectConfig(projectDir);
+
+    expect(result).not.toBeNull();
+    expect(result!.routes).toEqual({ web: "http://localhost:3000" });
+    expect(result!.worktrees).toEqual({});
+  });
+});
+
+// ── loadConfig ─────────────────────────────────────────────
+
+describe("loadConfig", () => {
+  it("returns default values when no global config exists", () => {
+    fsMock.existsSync.mockReturnValue(false);
+
+    const result = loadConfig();
+
+    expect(result).toEqual({
+      domain: "localhost",
+      port: 3000,
+      httpsPort: 3443,
+      certPath: undefined,
+      keyPath: undefined,
+      projects: [],
+    });
+  });
+
+  it("reads domain, port, httpsPort from global config", () => {
+    const globalConfig = { domain: "myapp.test", port: 9000, httpsPort: 9443 };
+
+    fsMock.existsSync.mockImplementation((p: string) => p === GLOBAL_CONFIG_PATH);
+    fsMock.readFileSync.mockReturnValue(JSON.stringify(globalConfig));
+
+    const result = loadConfig();
+
+    expect(result.domain).toBe("myapp.test");
+    expect(result.port).toBe(9000);
+    expect(result.httpsPort).toBe(9443);
+    expect(result.projects).toEqual([]);
+  });
+
+  it("resolves relative cert/key paths against config dir", () => {
+    const globalConfig = {
+      certPath: "certs/dev.pem",
+      keyPath: "certs/dev-key.pem",
+    };
+
+    fsMock.existsSync.mockImplementation((p: string) => p === GLOBAL_CONFIG_PATH);
+    fsMock.readFileSync.mockReturnValue(JSON.stringify(globalConfig));
+
+    const result = loadConfig();
+
+    expect(result.certPath).toBe(`${CONFIG_DIR}/certs/dev.pem`);
+    expect(result.keyPath).toBe(`${CONFIG_DIR}/certs/dev-key.pem`);
+  });
+
+  it("loads project configs for all registered projects", () => {
+    const projectDir = "/projects/my-app";
+    const projectConfigPath = `${projectDir}/${PROJECT_CONFIG_NAME}`;
+    const projectConfig = {
+      routes: { app: "http://localhost:3000" },
+      worktrees: {},
+    };
+    const globalConfig = { projects: [projectDir] };
+
+    fsMock.existsSync.mockImplementation(
+      (p: string) => p === GLOBAL_CONFIG_PATH || p === projectConfigPath,
+    );
+    fsMock.readFileSync.mockImplementation((p: string) => {
+      if (p === GLOBAL_CONFIG_PATH) return JSON.stringify(globalConfig);
+      if (p === projectConfigPath) return JSON.stringify(projectConfig);
+      return "";
+    });
+
+    const result = loadConfig();
+
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0]).toEqual({
+      path: projectDir,
+      configPath: projectConfigPath,
+      routes: projectConfig.routes,
+      worktrees: {},
+    });
   });
 });

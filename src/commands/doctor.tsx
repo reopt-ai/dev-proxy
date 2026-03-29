@@ -467,3 +467,5 @@ function Doctor() {
 }
 
 render(<Doctor />);
+
+export const __testing = { collectSubdomains, withTimeout, checkWorktreeConfig };

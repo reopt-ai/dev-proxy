@@ -122,4 +122,7 @@ export const config = loadConfig();
 export const __testing = {
   parsePort,
   resolveFilePath,
+  loadJson,
+  loadProjectConfig,
+  loadConfig,
 };

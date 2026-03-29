@@ -32,6 +32,17 @@ function findOwningProject(cwd: string): string | null {
   return null;
 }
 
+// ── Helpers ──────────────────────────────────────────────────
+
+function formatPorts(entry: WorktreeEntry): string {
+  if ("ports" in entry) {
+    return Object.entries(entry.ports)
+      .map(([svc, p]) => `${svc}:${p}`)
+      .join(", ");
+  }
+  return `port ${entry.port}`;
+}
+
 // ── List worktrees ───────────────────────────────────────────
 
 function WorktreeList() {
@@ -54,15 +65,6 @@ function WorktreeList() {
         <Text dimColor>{"    (none)"}</Text>
       </Box>
     );
-  }
-
-  function formatPorts(entry: WorktreeEntry): string {
-    if ("ports" in entry) {
-      return Object.entries(entry.ports)
-        .map(([svc, p]) => `${svc}:${p}`)
-        .join(", ");
-    }
-    return `port ${entry.port}`;
   }
 
   return (
@@ -491,3 +493,5 @@ if (subcommand === "create") {
   // "list" or no subcommand → default to list
   render(<WorktreeList />);
 }
+
+export const __testing = { findOwningProject, formatPorts };

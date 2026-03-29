@@ -72,4 +72,6 @@ function Status() {
   );
 }
 
+export const __testing = { formatTarget };
+
 render(<Status />);

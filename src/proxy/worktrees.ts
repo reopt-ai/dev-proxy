@@ -130,7 +130,23 @@ export function useWorktrees(): Map<string, WorktreeEntry> {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-export const __testing = { isValidEntry };
+export const __testing = {
+  isValidEntry,
+  readRegistry,
+  readProjectWorktrees,
+  get worktreeMap() {
+    return worktreeMap;
+  },
+  set worktreeMap(m: Map<string, WorktreeEntry>) {
+    worktreeMap = m;
+  },
+  get watchers() {
+    return watchers;
+  },
+  get debounceTimer() {
+    return debounceTimer;
+  },
+};
 
 export function stopRegistry(): void {
   for (const w of watchers) w.close();

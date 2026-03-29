@@ -459,6 +459,10 @@ export function startProxyServer(
   });
 }
 
+function resetNextId(): void {
+  _nextId = 0;
+}
+
 export const __testing = {
   escapeHtml,
   parseCookies,
@@ -467,4 +471,11 @@ export const __testing = {
   formatListenError,
   normalizeTargetProtocol,
   targetPort,
+  worktreeErrorPage,
+  requestTransport,
+  connectToTarget,
+  createRequestHandler,
+  createUpgradeHandler,
+  nextId,
+  resetNextId,
 };
