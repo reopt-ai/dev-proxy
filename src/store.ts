@@ -518,7 +518,7 @@ function getSnapshot(): StoreSnapshot {
   return cachedSnapshot!;
 }
 
-function subscribe(callback: Listener): () => void {
+export function subscribe(callback: Listener): () => void {
   listeners.add(callback);
   return () => {
     listeners.delete(callback);
@@ -553,6 +553,23 @@ export function useSelectedDetail(): RequestDetail | null {
 export function useActiveWsCount(): number {
   const snap = useStore();
   return snap.activeWsCount;
+}
+
+/** Current follow mode state. */
+export function getFollowMode(): boolean {
+  return followMode;
+}
+
+/** Currently selected event (if any). */
+export function getSelected(): SlimEvent | undefined {
+  return events[selectedIndex];
+}
+
+/** Detail data for currently selected event. */
+export function getSelectedDetail(): RequestDetail | null {
+  const sel = events[selectedIndex];
+  if (!sel) return null;
+  return detailMap.get(sel.id) ?? null;
 }
 
 // ── Replay ───────────────────────────────────────────────────

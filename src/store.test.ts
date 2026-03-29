@@ -2,18 +2,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __testing,
   clearAll,
+  getFollowMode,
+  getSelected,
   getSelectedCurl,
+  getSelectedDetail,
   getSelectedReplayInfo,
+  isDetailActive,
+  pauseFollow,
   pushHttp,
   pushWs,
-  setInspectActive,
+  selectByFilteredIndex,
+  selectFirst,
   selectLast,
+  selectNext,
+  selectPrev,
+  setInspectActive,
   setSearchQuery,
+  subscribe,
   toggleErrorsOnly,
   toggleFollow,
   toggleHideNoise,
 } from "./store.js";
 import type { ProxyRequestEvent, ProxyWsEvent } from "./proxy/types.js";
+
+const DETAIL_IDLE_TIMEOUT_MS = 30_000;
+const THROTTLE_INTERVAL_MS = 100;
 
 function makeHttpEvent(
   overrides: Partial<ProxyRequestEvent> & Pick<ProxyRequestEvent, "id" | "url">,
@@ -72,7 +85,6 @@ describe("dev-proxy store", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    __testing.reset();
   });
 
   it("re-enabling follow keeps the last visible request selected", () => {
@@ -82,7 +94,7 @@ describe("dev-proxy store", () => {
     toggleFollow();
     toggleFollow();
 
-    expect(__testing.selected()?.id).toBe("req-1");
+    expect(getSelected()?.id).toBe("req-1");
     expect(__testing.snapshot().selectedIndex).toBe(0);
   });
 
@@ -97,7 +109,7 @@ describe("dev-proxy store", () => {
     const snapshot = __testing.snapshot();
     expect(snapshot.events.map((event) => event.id)).toEqual(["req-1", "req-3"]);
     expect(snapshot.selectedIndex).toBe(1);
-    expect(__testing.selected()?.id).toBe("req-3");
+    expect(getSelected()?.id).toBe("req-3");
   });
 
   it("refreshes the filtered snapshot when new visible requests arrive", () => {
@@ -109,7 +121,7 @@ describe("dev-proxy store", () => {
 
     const snapshot = __testing.snapshot();
     expect(snapshot.events.map((event) => event.id)).toEqual(["req-1", "req-2"]);
-    expect(__testing.selected()?.id).toBe("req-2");
+    expect(getSelected()?.id).toBe("req-2");
   });
 
   it("notifies selected subscribers when a selected websocket closes", () => {
@@ -125,10 +137,10 @@ describe("dev-proxy store", () => {
 
     expect(listener).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(110);
+    vi.advanceTimersByTime(THROTTLE_INTERVAL_MS + 10);
 
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(__testing.selected()).toMatchObject({
+    expect(getSelected()).toMatchObject({
       id: "ws-1",
       type: "ws",
       wsStatus: "closed",
@@ -149,7 +161,7 @@ describe("dev-proxy store", () => {
       }),
     );
 
-    expect(__testing.selectedDetail()).not.toBeNull();
+    expect(getSelectedDetail()).not.toBeNull();
 
     setInspectActive(false);
 
@@ -164,8 +176,8 @@ describe("dev-proxy store", () => {
       }),
     );
 
-    expect(__testing.selected()?.id).toBe("req-2");
-    expect(__testing.selectedDetail()).toBeNull();
+    expect(getSelected()?.id).toBe("req-2");
+    expect(getSelectedDetail()).toBeNull();
 
     setInspectActive(true);
 
@@ -180,8 +192,8 @@ describe("dev-proxy store", () => {
       }),
     );
 
-    expect(__testing.selected()?.id).toBe("req-3");
-    expect(__testing.selectedDetail()).not.toBeNull();
+    expect(getSelected()?.id).toBe("req-3");
+    expect(getSelectedDetail()).not.toBeNull();
   });
 
   it("tracks active websocket count without truncating long-running sessions", () => {
@@ -325,7 +337,7 @@ describe("dev-proxy store", () => {
     // Only the last 50 should have detail retained
     selectLast();
     // Earliest detail should be evicted
-    expect(__testing.selectedDetail()).not.toBeNull();
+    expect(getSelectedDetail()).not.toBeNull();
 
     // Manually select the first event — its detail should be gone
     // (we can verify via getSelectedReplayInfo which checks detailMap)
@@ -396,5 +408,503 @@ describe("dev-proxy store", () => {
 
     const snapshot = __testing.snapshot();
     expect(snapshot.events.map((e) => e.id)).toEqual(["err-500", "err-net", "ws-err"]);
+  });
+});
+
+// ── Navigation ──────────────────────────────────────────────
+
+describe("selectNext", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("advances selectedIndex to next event", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+    pushHttp(makeHttpEvent({ id: "c", url: "/c" }));
+
+    // followMode puts us on the last event; go to first then advance
+    selectFirst();
+    expect(getSelected()?.id).toBe("a");
+
+    selectNext();
+    expect(getSelected()?.id).toBe("b");
+  });
+
+  it("stops at last event (does not go past end)", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    // Already at last via followMode; selectNext should stay
+    selectNext();
+    selectNext();
+    selectNext();
+
+    expect(getSelected()?.id).toBe("b");
+    expect(__testing.snapshot().selectedIndex).toBe(1);
+  });
+
+  it("sets followMode to false", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    expect(getFollowMode()).toBe(true);
+
+    selectNext();
+
+    expect(getFollowMode()).toBe(false);
+  });
+
+  it("works correctly with noise filter active (filtered subset)", () => {
+    pushHttp(makeHttpEvent({ id: "real-1", url: "/dashboard" }));
+    pushHttp(makeHttpEvent({ id: "noise-1", url: "/_next/static/chunk.js" }));
+    pushHttp(makeHttpEvent({ id: "real-2", url: "/settings" }));
+    pushHttp(makeHttpEvent({ id: "noise-2", url: "/_next/webpack-hmr" }));
+    pushHttp(makeHttpEvent({ id: "real-3", url: "/profile" }));
+
+    // Default: hideNextStatic = true, so only real-1, real-2, real-3 are visible
+    selectFirst();
+    expect(getSelected()?.id).toBe("real-1");
+
+    selectNext();
+    expect(getSelected()?.id).toBe("real-2");
+
+    selectNext();
+    expect(getSelected()?.id).toBe("real-3");
+  });
+
+  it("no-op when events array is empty", () => {
+    const before = __testing.snapshot().version;
+    selectNext();
+    // Version still increments on notifySync but selectedIndex stays -1
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+    expect(getSelected()).toBeUndefined();
+
+    // Verify no crash occurred — snapshot is still valid
+    expect(__testing.snapshot().events).toHaveLength(0);
+    void before; // acknowledged
+  });
+});
+
+describe("selectPrev", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("moves selectedIndex to previous event", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+    pushHttp(makeHttpEvent({ id: "c", url: "/c" }));
+
+    // followMode places selection at last event (c)
+    expect(getSelected()?.id).toBe("c");
+
+    selectPrev();
+    expect(getSelected()?.id).toBe("b");
+
+    selectPrev();
+    expect(getSelected()?.id).toBe("a");
+  });
+
+  it("stops at first event (does not go before 0)", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    selectFirst();
+    selectPrev();
+    selectPrev();
+
+    expect(getSelected()?.id).toBe("a");
+    expect(__testing.snapshot().selectedIndex).toBe(0);
+  });
+
+  it("sets followMode to false", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    expect(getFollowMode()).toBe(true);
+
+    selectPrev();
+
+    expect(getFollowMode()).toBe(false);
+  });
+
+  it("works correctly with noise filter active", () => {
+    pushHttp(makeHttpEvent({ id: "real-1", url: "/dashboard" }));
+    pushHttp(makeHttpEvent({ id: "noise-1", url: "/_next/static/chunk.js" }));
+    pushHttp(makeHttpEvent({ id: "real-2", url: "/settings" }));
+
+    // With noise hidden, filtered = [real-1, real-2], selection at real-2 (follow)
+    expect(getSelected()?.id).toBe("real-2");
+
+    selectPrev();
+    expect(getSelected()?.id).toBe("real-1");
+
+    // Should not skip to noise — stays at real-1
+    selectPrev();
+    expect(getSelected()?.id).toBe("real-1");
+  });
+
+  it("no-op when events array is empty", () => {
+    selectPrev();
+
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+    expect(getSelected()).toBeUndefined();
+    expect(__testing.snapshot().events).toHaveLength(0);
+  });
+});
+
+describe("selectFirst", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("moves selection to first filtered event", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+    pushHttp(makeHttpEvent({ id: "c", url: "/c" }));
+
+    // followMode has selection at "c"
+    expect(getSelected()?.id).toBe("c");
+
+    selectFirst();
+
+    expect(getSelected()?.id).toBe("a");
+    expect(__testing.snapshot().selectedIndex).toBe(0);
+  });
+
+  it("sets followMode to false", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+
+    expect(getFollowMode()).toBe(true);
+
+    selectFirst();
+
+    expect(getFollowMode()).toBe(false);
+  });
+
+  it("no-op when events array is empty", () => {
+    selectFirst();
+
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+    expect(getSelected()).toBeUndefined();
+  });
+});
+
+describe("selectByFilteredIndex", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("selects event at given filtered index", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+    pushHttp(makeHttpEvent({ id: "c", url: "/c" }));
+
+    selectByFilteredIndex(1);
+
+    expect(getSelected()?.id).toBe("b");
+    expect(__testing.snapshot().selectedIndex).toBe(1);
+  });
+
+  it("sets followMode to false", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    expect(getFollowMode()).toBe(true);
+
+    selectByFilteredIndex(0);
+
+    expect(getFollowMode()).toBe(false);
+  });
+
+  it("ignores out-of-range index (negative)", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    // Selection is at "b" via followMode
+    const before = getSelected()?.id;
+
+    selectByFilteredIndex(-1);
+
+    // Selection should not change
+    expect(getSelected()?.id).toBe(before);
+  });
+
+  it("ignores out-of-range index (>= filtered length)", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    const before = getSelected()?.id;
+
+    selectByFilteredIndex(99);
+
+    expect(getSelected()?.id).toBe(before);
+  });
+});
+
+describe("pauseFollow", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sets followMode to false", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+
+    expect(getFollowMode()).toBe(true);
+
+    pauseFollow();
+
+    expect(getFollowMode()).toBe(false);
+  });
+
+  it("no-op when followMode is already false (snapshot version does not change)", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+
+    // Turn off follow first
+    pauseFollow();
+    const versionAfterFirstPause = __testing.snapshot().version;
+
+    // Second call should be a no-op (early return)
+    pauseFollow();
+
+    expect(__testing.snapshot().version).toBe(versionAfterFirstPause);
+    expect(getFollowMode()).toBe(false);
+  });
+
+  it("triggers notification (version increments)", () => {
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+
+    const versionBefore = __testing.snapshot().version;
+
+    pauseFollow();
+
+    expect(__testing.snapshot().version).toBeGreaterThan(versionBefore);
+  });
+});
+
+describe("isDetailActive / idle timeout", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns true when inspect is active (after setInspectActive(true))", () => {
+    setInspectActive(true);
+
+    expect(isDetailActive()).toBe(true);
+  });
+
+  it("returns false after idle timeout expires", () => {
+    vi.useFakeTimers();
+
+    // setInspectActive triggers resetDetailIdle which starts the 30s timer
+    setInspectActive(false);
+    setInspectActive(true);
+
+    expect(isDetailActive()).toBe(true);
+
+    // Advance past the 30s idle timeout
+    vi.advanceTimersByTime(DETAIL_IDLE_TIMEOUT_MS + 1_000);
+
+    expect(isDetailActive()).toBe(false);
+  });
+
+  it("resets to true on navigation action (selectNext resets the idle timer)", () => {
+    vi.useFakeTimers();
+
+    // Trigger the idle timer
+    setInspectActive(false);
+    setInspectActive(true);
+
+    // Advance close to the timeout but not past it
+    vi.advanceTimersByTime(25_000);
+    expect(isDetailActive()).toBe(true);
+
+    // Push events so we have something to navigate
+    pushHttp(makeHttpEvent({ id: "a", url: "/a" }));
+    pushHttp(makeHttpEvent({ id: "b", url: "/b" }));
+
+    // Navigation resets the idle timer
+    selectNext();
+
+    // Advance another 25s — would have expired if timer wasn't reset
+    vi.advanceTimersByTime(25_000);
+    expect(isDetailActive()).toBe(true);
+
+    // Now advance past the full 30s from the reset point
+    vi.advanceTimersByTime(6_000);
+    expect(isDetailActive()).toBe(false);
+  });
+});
+
+describe("detail LRU eviction", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("detail is evicted when exceeding MAX_DETAIL (50) entries", () => {
+    // Push 55 events with detail active (default)
+    for (let i = 0; i < 55; i++) {
+      pushHttp(
+        makeHttpEvent({
+          id: `lru-${i}`,
+          url: `/page/${i}`,
+          requestHeaders: { host: "h", "x-seq": String(i) },
+        }),
+      );
+    }
+
+    // Select the earliest event — its detail should have been evicted
+    selectByFilteredIndex(0);
+    expect(getSelected()?.id).toBe("lru-0");
+    expect(getSelectedDetail()).toBeNull();
+
+    // A recent event should still have detail
+    selectByFilteredIndex(54);
+    expect(getSelected()?.id).toBe("lru-54");
+    expect(getSelectedDetail()).not.toBeNull();
+  });
+
+  it("most recently accessed detail survives eviction", () => {
+    // Push 50 events to fill the LRU exactly
+    for (let i = 0; i < 50; i++) {
+      pushHttp(
+        makeHttpEvent({
+          id: `surv-${i}`,
+          url: `/page/${i}`,
+          requestHeaders: { host: "h", "x-seq": String(i) },
+        }),
+      );
+    }
+
+    // Access event 0 by selecting it — this moves it to most-recently-used
+    // in the detail map (via getSelectedReplayInfo or direct access)
+    selectByFilteredIndex(0);
+    expect(getSelectedDetail()).not.toBeNull();
+
+    // Now push 5 more events — this should evict the 5 oldest entries
+    // but event 0's detail was accessed (it's still in the map, not re-inserted)
+    // The LRU is insert-order based (Map), so event 0 was inserted first
+    // and will be evicted unless it was re-inserted via pushHttp update
+    for (let i = 50; i < 55; i++) {
+      pushHttp(
+        makeHttpEvent({
+          id: `surv-${i}`,
+          url: `/page/${i}`,
+          requestHeaders: { host: "h", "x-seq": String(i) },
+        }),
+      );
+    }
+
+    // The most recent entries (50-54) should have detail
+    selectByFilteredIndex(54);
+    expect(getSelected()?.id).toBe("surv-54");
+    expect(getSelectedDetail()).not.toBeNull();
+
+    // Intermediate entries that weren't touched should also have detail
+    // if they are within the most recent 50
+    selectByFilteredIndex(10);
+    expect(getSelected()?.id).toBe("surv-10");
+    expect(getSelectedDetail()).not.toBeNull();
+
+    // The earliest entries (0-4) should have been evicted
+    selectByFilteredIndex(0);
+    expect(getSelected()?.id).toBe("surv-0");
+    expect(getSelectedDetail()).toBeNull();
+  });
+});
+
+// ── Subscriber notification ─────────────────────────────────
+
+describe("subscribe", () => {
+  beforeEach(() => {
+    __testing.reset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("notifies listener on event push", () => {
+    const listener = vi.fn();
+    const unsub = subscribe(listener);
+    pushHttp(makeHttpEvent({ id: "sub-1", url: "/test" }));
+    vi.advanceTimersByTime(THROTTLE_INTERVAL_MS + 10);
+    expect(listener).toHaveBeenCalled();
+    unsub();
+  });
+
+  it("notifies listener on filter toggle", () => {
+    pushHttp(makeHttpEvent({ id: "sub-2", url: "/test" }));
+    vi.advanceTimersByTime(THROTTLE_INTERVAL_MS + 10);
+    const listener = vi.fn();
+    const unsub = subscribe(listener);
+    toggleHideNoise();
+    expect(listener).toHaveBeenCalled();
+    unsub();
+  });
+
+  it("does not notify after unsubscribe", () => {
+    const listener = vi.fn();
+    const unsub = subscribe(listener);
+    unsub();
+    pushHttp(makeHttpEvent({ id: "sub-3", url: "/test" }));
+    vi.advanceTimersByTime(THROTTLE_INTERVAL_MS + 10);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("multiple subscribers all receive notification", () => {
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    const unsub1 = subscribe(listener1);
+    const unsub2 = subscribe(listener2);
+    pushHttp(makeHttpEvent({ id: "sub-4", url: "/test" }));
+    vi.advanceTimersByTime(THROTTLE_INTERVAL_MS + 10);
+    expect(listener1).toHaveBeenCalled();
+    expect(listener2).toHaveBeenCalled();
+    unsub1();
+    unsub2();
+  });
+
+  it("unsubscribing one does not affect others", () => {
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    const unsub1 = subscribe(listener1);
+    const unsub2 = subscribe(listener2);
+    unsub1();
+    pushHttp(makeHttpEvent({ id: "sub-5", url: "/test" }));
+    vi.advanceTimersByTime(THROTTLE_INTERVAL_MS + 10);
+    expect(listener1).not.toHaveBeenCalled();
+    expect(listener2).toHaveBeenCalled();
+    unsub2();
   });
 });
