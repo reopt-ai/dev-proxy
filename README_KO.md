@@ -5,6 +5,9 @@
 [![codecov](https://codecov.io/gh/reopt-ai/dev-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/reopt-ai/dev-proxy)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
+[![npm downloads](https://img.shields.io/npm/dm/@reopt-ai/dev-proxy)](https://www.npmjs.com/package/@reopt-ai/dev-proxy)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **서브도메인 기반 리버스 프록시 + 실시간 HTTP/WS 트래픽 인스펙터 TUI.**
 
