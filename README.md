@@ -9,6 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/reopt-ai/dev-proxy/badge)](https://scorecard.dev/viewer/?uri=github.com/reopt-ai/dev-proxy)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12292/badge)](https://www.bestpractices.dev/projects/12292)
 
 **Subdomain-based reverse proxy with a real-time HTTP/WS traffic inspector TUI.**
 
