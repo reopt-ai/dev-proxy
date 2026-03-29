@@ -177,7 +177,7 @@ function evictExcess() {
   let writeIdx = 0;
   // eslint-disable-next-line @typescript-eslint/prefer-for-of -- in-place compaction needs writeIdx
   for (let i = 0; i < events.length; i++) {
-    const ev = events[i]!;
+    const ev = events[i] as SlimEvent;
     if (!toRemove.has(ev.id)) {
       events[writeIdx] = ev;
       indexById.set(ev.id, writeIdx);
@@ -515,7 +515,7 @@ function getSnapshot(): StoreSnapshot {
     };
     cachedVersion = version;
   }
-  return cachedSnapshot!;
+  return cachedSnapshot as StoreSnapshot;
 }
 
 /** @internal Used by useSyncExternalStore and tests — not part of the public API. */

@@ -75,7 +75,7 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
                   let portLabel: string;
                   if ("ports" in entry) {
                     const vals = Object.values(entry.ports);
-                    const first = vals[0]!;
+                    const first = vals[0] as number;
                     portLabel =
                       vals.length > 1
                         ? `:${first} +${vals.length - 1} more`
