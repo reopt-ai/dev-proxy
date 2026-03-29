@@ -518,6 +518,7 @@ function getSnapshot(): StoreSnapshot {
   return cachedSnapshot!;
 }
 
+/** @internal Used by useSyncExternalStore and tests — not part of the public API. */
 export function subscribe(callback: Listener): () => void {
   listeners.add(callback);
   return () => {

@@ -303,12 +303,8 @@ describe("worktreeErrorPage", () => {
       new URL("http://localhost:3001"),
       "ECONNREFUSED",
     );
-    expect(html).toContain("<!DOCTYPE html>");
-    expect(html).toContain("feat-login");
-    expect(html).toContain("http://localhost:3001");
-    expect(html).toContain("ECONNREFUSED");
-    expect(html).toContain("<html");
-    expect(html).toContain("</html>");
+    // Snapshot catches any structural drift in the error page
+    expect(html).toMatchSnapshot();
   });
 });
 
@@ -527,6 +523,8 @@ describe("createRequestHandler", () => {
     ]);
     const ev = events[0]!;
     expect(ev.statusCode).toBe(200);
+    // duration can be 0 on sub-millisecond localhost responses
+    expect(typeof ev.duration).toBe("number");
     expect(ev.duration).toBeGreaterThanOrEqual(0);
     expect(ev.responseSize).toBeGreaterThan(0);
   });
