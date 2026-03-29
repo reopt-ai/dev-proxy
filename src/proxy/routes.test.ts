@@ -291,14 +291,14 @@ describe("getTarget", () => {
   it("resolves known subdomain to correct target URL", () => {
     const result = getTarget("studio.test.dev:3000");
     expect(result.url).not.toBeNull();
-    expect(result.url!.origin).toBe("http://localhost:4000");
+    expect(result.url?.origin).toBe("http://localhost:4000");
     expect(result.worktree).toBeNull();
   });
 
   it("falls back to wildcard for unmatched subdomain", () => {
     const result = getTarget("unknown-xyz.test.dev:3000");
     expect(result.url).not.toBeNull();
-    expect(result.url!.origin).toBe("http://localhost:5000");
+    expect(result.url?.origin).toBe("http://localhost:5000");
     expect(result.worktree).toBeNull();
   });
 
@@ -353,7 +353,7 @@ describe("getTarget", () => {
     // Empty host parses to app="" worktree=null, no route for ""
     // Falls back to wildcard (http://localhost:5000)
     expect(result.url).not.toBeNull();
-    expect(result.url!.origin).toBe("http://localhost:5000");
+    expect(result.url?.origin).toBe("http://localhost:5000");
     expect(result.worktree).toBeNull();
   });
 
@@ -363,6 +363,6 @@ describe("getTarget", () => {
     // Should not crash, should fall through to route lookup for "api"
     expect(result.worktree).toBeNull();
     expect(result.url).not.toBeNull();
-    expect(result.url!.origin).toBe("http://localhost:4001");
+    expect(result.url?.origin).toBe("http://localhost:4001");
   });
 });

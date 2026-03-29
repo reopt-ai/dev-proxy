@@ -229,7 +229,7 @@ describe("getWorktreeTarget — multi-service", () => {
 
     const url = getWorktreeTarget("feat");
     expect(url).toBeInstanceOf(URL);
-    expect(url!.href).toBe("http://localhost:4000/");
+    expect(url?.href).toBe("http://localhost:4000/");
   });
 
   it("returns URL for registered branch with multi-port and default service", () => {
@@ -238,7 +238,7 @@ describe("getWorktreeTarget — multi-service", () => {
     // No service specified — should return first port (web: 5000)
     const url = getWorktreeTarget("feat");
     expect(url).toBeInstanceOf(URL);
-    expect(url!.href).toBe("http://localhost:5000/");
+    expect(url?.href).toBe("http://localhost:5000/");
   });
 
   it("returns URL for specific service in multi-port entry", () => {
@@ -246,7 +246,7 @@ describe("getWorktreeTarget — multi-service", () => {
 
     const url = getWorktreeTarget("feat", "api");
     expect(url).toBeInstanceOf(URL);
-    expect(url!.href).toBe("http://localhost:5001/");
+    expect(url?.href).toBe("http://localhost:5001/");
   });
 
   it("falls back to first port for unknown service name", () => {
@@ -254,7 +254,7 @@ describe("getWorktreeTarget — multi-service", () => {
 
     const url = getWorktreeTarget("feat", "nonexistent");
     expect(url).toBeInstanceOf(URL);
-    expect(url!.href).toBe("http://localhost:5000/");
+    expect(url?.href).toBe("http://localhost:5000/");
   });
 
   it("returns null for empty ports object", () => {
@@ -270,7 +270,7 @@ describe("getWorktreeTarget — multi-service", () => {
 
     const url = getWorktreeTarget("feat", "api");
     expect(url).toBeInstanceOf(URL);
-    expect(url!.href).toBe("http://localhost:4000/");
+    expect(url?.href).toBe("http://localhost:4000/");
   });
 });
 

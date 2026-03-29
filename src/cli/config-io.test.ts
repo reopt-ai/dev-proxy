@@ -215,7 +215,7 @@ describe("writeGlobalConfig", () => {
 
   it("writes pretty-printed JSON with trailing newline", () => {
     writeGlobalConfig({ domain: "test.local", port: 3000 });
-    const written = mockWriteFileSync.mock.calls[0]![1] as string;
+    const written = mockWriteFileSync.mock.calls[0]?.[1] as string;
     const expected = JSON.stringify({ domain: "test.local", port: 3000 }, null, 2) + "\n";
     expect(written).toBe(expected);
   });
@@ -223,7 +223,7 @@ describe("writeGlobalConfig", () => {
   it("uses atomic write (writes to temp then renames)", () => {
     writeGlobalConfig({ domain: "test.local" });
     // Should write to .tmp file first
-    const tmpPath = mockWriteFileSync.mock.calls[0]![0] as string;
+    const tmpPath = mockWriteFileSync.mock.calls[0]?.[0] as string;
     expect(tmpPath).toBe("/mock/.dev-proxy/config.json.tmp");
     // Then rename to final path
     expect(mockRenameSync).toHaveBeenCalledWith(

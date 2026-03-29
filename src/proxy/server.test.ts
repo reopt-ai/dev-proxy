@@ -53,6 +53,13 @@ function captureEvents<T>(
   });
 }
 
+/** Extract the first captured event with a runtime assertion — avoids non-null `!`. */
+function firstEvent<T>(events: T[]): T {
+  const ev = events[0];
+  expect(ev).toBeDefined();
+  return ev as T;
+}
+
 // ── Mocks ─────────────────────────────────────────────────────
 
 const mockGetTarget =
@@ -509,7 +516,7 @@ describe("createRequestHandler", () => {
         headers: { host: "myapp.test.dev" },
       }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.url).toBe("/test-path");
     expect(ev.method).toBe("GET");
     expect(ev.host).toBe("myapp.test.dev");
@@ -521,7 +528,7 @@ describe("createRequestHandler", () => {
       captureEvents<ProxyRequestEvent>(emitter, "request:complete", 1),
       makeRequest({ method: "GET", path: "/complete-test" }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.statusCode).toBe(200);
     // duration can be 0 on sub-millisecond localhost responses
     expect(typeof ev.duration).toBe("number");
@@ -539,7 +546,7 @@ describe("createRequestHandler", () => {
       captureEvents<ProxyRequestEvent>(emitter, "request:error", 1),
       makeRequest({ method: "GET", path: "/unreachable" }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(res.status).toBe(502);
     expect(ev.error).toContain("ECONNREFUSED");
   });
@@ -565,7 +572,7 @@ describe("createRequestHandler", () => {
         headers: { host: "app.test.dev", cookie: "session=abc" },
       }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.cookies).toEqual({ session: "abc" });
     expect(ev.query).toEqual({ foo: "bar" });
     expect(Object.keys(ev.requestHeaders).length).toBeGreaterThan(0);
@@ -582,7 +589,7 @@ describe("createRequestHandler", () => {
         headers: { host: "app.test.dev", cookie: "session=abc" },
       }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.cookies).toEqual({});
     expect(ev.query).toEqual({});
     expect(ev.requestHeaders).toEqual({});
@@ -594,7 +601,7 @@ describe("createRequestHandler", () => {
       captureEvents<ProxyRequestEvent>(emitter, "request:complete", 1),
       makeRequest({ method: "GET", path: "/size-test" }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.responseSize).toBeGreaterThan(0);
   });
 
@@ -639,7 +646,7 @@ describe("createRequestHandler", () => {
         headers: { host: "nope.test.dev" },
       }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.error).toBe("no route configured");
     expect(ev.target).toBe("");
   });
@@ -654,7 +661,7 @@ describe("createRequestHandler", () => {
         headers: { host: "nope.test.dev" },
       }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.error).toBe("no route configured");
   });
 
@@ -683,7 +690,7 @@ describe("createRequestHandler", () => {
       captureEvents<ProxyRequestEvent>(emitter, "request:complete", 1),
       makeRequest({ method: "GET", path: "/resp-headers" }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(Object.keys(ev.responseHeaders).length).toBeGreaterThan(0);
     expect(ev.responseHeaders["content-type"]).toContain("application/json");
   });
@@ -695,7 +702,7 @@ describe("createRequestHandler", () => {
       captureEvents<ProxyRequestEvent>(emitter, "request:complete", 1),
       makeRequest({ method: "GET", path: "/resp-headers" }),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
     expect(ev.responseHeaders).toEqual({});
   });
 });
@@ -804,7 +811,7 @@ describe("createUpgradeHandler", () => {
       captureEvents<ProxyWsEvent>(emitter, "ws", 1),
       sendUpgradeRequest("app.test.dev"),
     ]);
-    const ev = events[0]!;
+    const ev = firstEvent(events);
 
     expect(response).toContain("101");
     expect(ev.status).toBe("open");

@@ -46,9 +46,9 @@ describe("buildListHeaderTokens", () => {
       searchQuery: "",
     });
     expect(result.left).toHaveLength(2);
-    expect(result.left[0]!.text).toBe("REQUESTS");
-    expect(result.left[1]!.text).toBe("FOLLOW");
-    expect(result.left[1]!.active).toBe(true);
+    expect(result.left[0]?.text).toBe("REQUESTS");
+    expect(result.left[1]?.text).toBe("FOLLOW");
+    expect(result.left[1]?.active).toBe(true);
   });
 
   it("shows meta when available >= 56", () => {
@@ -116,6 +116,6 @@ describe("buildListHeaderTokens", () => {
     const queryToken = result.right.find((t) => t.kind === "query");
     expect(queryToken).toBeDefined();
     // 18 chars max for filters view + "/" prefix
-    expect(queryToken!.text.length).toBeLessThanOrEqual(19);
+    expect(queryToken?.text.length).toBeLessThanOrEqual(19);
   });
 });

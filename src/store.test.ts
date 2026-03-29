@@ -272,7 +272,7 @@ describe("dev-proxy store", () => {
 
     const info = getSelectedReplayInfo();
     expect(info).not.toBeNull();
-    expect(info!.requestHeaders).toEqual({
+    expect(info?.requestHeaders).toEqual({
       host: "api.example.dev:3000",
       authorization: "Bearer token123",
       "content-type": "application/json",
@@ -294,7 +294,7 @@ describe("dev-proxy store", () => {
 
     const info = getSelectedReplayInfo();
     expect(info).not.toBeNull();
-    expect(info!.requestHeaders).toEqual({});
+    expect(info?.requestHeaders).toEqual({});
   });
 
   it("evicts oldest noise first when exceeding MAX_EVENTS", () => {

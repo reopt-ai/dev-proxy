@@ -198,8 +198,8 @@ describe("checkWorktreeConfig", () => {
     const results = checkWorktreeConfig(projects);
     const conflict = results.find((r) => !r.ok && r.label.includes("port 4001"));
     expect(conflict).toBeDefined();
-    expect(conflict!.label).toContain("feat1");
-    expect(conflict!.label).toContain("feat2");
+    expect(conflict?.label).toContain("feat1");
+    expect(conflict?.label).toContain("feat2");
   });
 
   it("reports valid when no port conflicts exist", () => {
@@ -235,7 +235,7 @@ describe("checkWorktreeConfig", () => {
     const results = checkWorktreeConfig(projects);
     const valid = results.find((r) => r.ok && r.label.includes("portRange"));
     expect(valid).toBeDefined();
-    expect(valid!.label).toContain("[4000, 5000]");
+    expect(valid?.label).toContain("[4000, 5000]");
   });
 
   it("reports invalid portRange when min >= max", () => {
@@ -374,8 +374,8 @@ describe("checkWorktreeConfig", () => {
     const results = checkWorktreeConfig(projects);
     const conflict = results.find((r) => !r.ok && r.label.includes("port 4002"));
     expect(conflict).toBeDefined();
-    expect(conflict!.label).toContain("feat1");
-    expect(conflict!.label).toContain("feat2");
+    expect(conflict?.label).toContain("feat1");
+    expect(conflict?.label).toContain("feat2");
   });
 
   it("handles wildcard service in cross-check (does not warn for '*')", () => {

@@ -188,8 +188,8 @@ describe("loadProjectConfig", () => {
     const result = loadProjectConfig(projectDir);
 
     expect(result).not.toBeNull();
-    expect(result!.routes).toEqual({});
-    expect(result!.worktrees).toEqual({ feat: { port: 5000 } });
+    expect(result?.routes).toEqual({});
+    expect(result?.worktrees).toEqual({ feat: { port: 5000 } });
   });
 
   it("defaults missing worktrees to empty object", () => {
@@ -204,8 +204,8 @@ describe("loadProjectConfig", () => {
     const result = loadProjectConfig(projectDir);
 
     expect(result).not.toBeNull();
-    expect(result!.routes).toEqual({ web: "http://localhost:3000" });
-    expect(result!.worktrees).toEqual({});
+    expect(result?.routes).toEqual({ web: "http://localhost:3000" });
+    expect(result?.worktrees).toEqual({});
   });
 });
 
