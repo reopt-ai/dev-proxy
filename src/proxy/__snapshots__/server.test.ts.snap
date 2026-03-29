@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`worktreeErrorPage > generates expected HTML structure 1`] = `
+"<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>Worktree Offline</title>
+<style>
+  body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#0a0a0a;color:#e5e5e5}
+  .card{max-width:480px;padding:2.5rem;border:1px solid #333;border-radius:12px;text-align:center}
+  h1{font-size:1.25rem;color:#f97316;margin:0 0 1rem}
+  code{background:#1a1a2e;padding:0.6rem 1rem;border-radius:6px;display:block;margin:1rem 0;color:#60a5fa;font-size:0.9rem;text-align:left}
+  .dim{color:#888;font-size:0.85rem}
+</style></head>
+<body><div class="card">
+  <h1>Worktree &ldquo;feat-login&rdquo; is offline</h1>
+  <p>Target <strong>http://localhost:3001</strong> is not responding.</p>
+  <code>cd worktree-feat-login && pnpm dev</code>
+  <p class="dim">ECONNREFUSED</p>
+</div></body></html>"
+`;
