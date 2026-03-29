@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ───────────────────────────────────────────────────
 // Must be set up before importing the module under test.
@@ -38,14 +38,12 @@ const DEFAULT_CERT = `${CERTS_DIR}/test.dev+1.pem`;
 const DEFAULT_KEY = `${CERTS_DIR}/test.dev+1-key.pem`;
 
 beforeEach(() => {
-  vi.restoreAllMocks();
-  // Silence console output during tests
-  vi.spyOn(console, "error").mockImplementation(vi.fn());
-  vi.spyOn(console, "warn").mockImplementation(vi.fn());
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
+  // Reset mock implementations so each test starts with clean fsMock/cpMock
+  fsMock.existsSync.mockReset();
+  fsMock.mkdirSync.mockReset();
+  fsMock.chmodSync.mockReset();
+  cpMock.execSync.mockReset();
+  cpMock.execFileSync.mockReset();
 });
 
 // ── Tests ───────────────────────────────────────────────────

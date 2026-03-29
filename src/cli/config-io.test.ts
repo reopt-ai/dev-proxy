@@ -1,4 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+vi.mock("node:fs", () => ({
+  existsSync: vi.fn(),
+  readFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  renameSync: vi.fn(),
+  unlinkSync: vi.fn(),
+}));
+
+// Re-export config constants so the module can resolve them
+vi.mock("../proxy/config.js", () => ({
+  CONFIG_DIR: "/mock/.dev-proxy",
+  GLOBAL_CONFIG_PATH: "/mock/.dev-proxy/config.json",
+  PROJECT_CONFIG_NAME: ".dev-proxy.json",
+}));
+
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import {
   isValidPort,
   isValidSubdomain,
@@ -7,6 +25,8 @@ import {
   getEntryPorts,
   getServicePort,
   generateEnvContent,
+  readGlobalConfig,
+  writeGlobalConfig,
 } from "./config-io.js";
 
 describe("isValidPort", () => {
@@ -130,5 +150,85 @@ describe("generateEnvContent", () => {
     const ports = { web: 3000 };
     const content = generateEnvContent(services, ports);
     expect(content).toBe("WEB_PORT=3000\n");
+  });
+});
+
+// ── File I/O tests ──────────────────────────────────────────
+
+const mockExistsSync = vi.mocked(existsSync);
+const mockReadFileSync = vi.mocked(readFileSync);
+const mockWriteFileSync = vi.mocked(writeFileSync);
+const mockMkdirSync = vi.mocked(mkdirSync);
+const mockRenameSync = vi.mocked(renameSync);
+
+describe("readGlobalConfig", () => {
+  beforeEach(() => {
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+    mockWriteFileSync.mockReset();
+    mockMkdirSync.mockReset();
+    mockRenameSync.mockReset();
+  });
+
+  it("returns parsed config when file exists", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ domain: "test.local", port: 8080 }),
+    );
+    const cfg = readGlobalConfig();
+    expect(cfg).toEqual({ domain: "test.local", port: 8080 });
+    expect(mockExistsSync).toHaveBeenCalledWith("/mock/.dev-proxy/config.json");
+  });
+
+  it("returns empty object when file does not exist", () => {
+    mockExistsSync.mockReturnValue(false);
+    const cfg = readGlobalConfig();
+    expect(cfg).toEqual({});
+    expect(mockReadFileSync).not.toHaveBeenCalled();
+  });
+
+  it("returns empty object and warns on JSON parse error", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue("not valid json{{{");
+    const cfg = readGlobalConfig();
+    expect(cfg).toEqual({});
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("Failed to parse"));
+  });
+});
+
+describe("writeGlobalConfig", () => {
+  beforeEach(() => {
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+    mockWriteFileSync.mockReset();
+    mockMkdirSync.mockReset();
+    mockRenameSync.mockReset();
+  });
+
+  it("creates config directory recursively and writes file", () => {
+    writeGlobalConfig({ domain: "test.local" });
+    expect(mockMkdirSync).toHaveBeenCalledWith("/mock/.dev-proxy", {
+      recursive: true,
+    });
+    expect(mockWriteFileSync).toHaveBeenCalled();
+  });
+
+  it("writes pretty-printed JSON with trailing newline", () => {
+    writeGlobalConfig({ domain: "test.local", port: 3000 });
+    const written = mockWriteFileSync.mock.calls[0]![1] as string;
+    const expected = JSON.stringify({ domain: "test.local", port: 3000 }, null, 2) + "\n";
+    expect(written).toBe(expected);
+  });
+
+  it("uses atomic write (writes to temp then renames)", () => {
+    writeGlobalConfig({ domain: "test.local" });
+    // Should write to .tmp file first
+    const tmpPath = mockWriteFileSync.mock.calls[0]![0] as string;
+    expect(tmpPath).toBe("/mock/.dev-proxy/config.json.tmp");
+    // Then rename to final path
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      "/mock/.dev-proxy/config.json.tmp",
+      "/mock/.dev-proxy/config.json",
+    );
   });
 });
