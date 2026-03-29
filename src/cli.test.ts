@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 // cli.ts has top-level await import() side effects (launches the proxy or
 // subcommands) so we cannot import it directly in tests. Instead we
@@ -19,6 +19,9 @@ vi.mock("./commands/worktree.js", () => ({}));
 import { vi } from "vitest";
 
 const { closest, levenshtein, KNOWN_COMMANDS } = await import("./cli.js");
+
+// Save original argv and exitCode for command routing tests
+const originalArgv = [...process.argv];
 
 // ── levenshtein ─────────────────────────────────────────────
 
@@ -118,5 +121,76 @@ describe("KNOWN_COMMANDS", () => {
 
   it("has exactly 6 commands", () => {
     expect(KNOWN_COMMANDS).toHaveLength(6);
+  });
+});
+
+// ── command routing (requires module re-import) ────────────
+
+describe("command routing", () => {
+  afterEach(() => {
+    process.argv = [...originalArgv];
+    process.exitCode = undefined;
+  });
+
+  it("routes 'status' command without error", async () => {
+    process.argv = ["node", "cli.js", "status"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("routes 'doctor' command without error", async () => {
+    process.argv = ["node", "cli.js", "doctor"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("routes 'config' command without error", async () => {
+    process.argv = ["node", "cli.js", "config"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("routes 'project' command without error", async () => {
+    process.argv = ["node", "cli.js", "project"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("routes 'worktree' command without error", async () => {
+    process.argv = ["node", "cli.js", "worktree"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("sets exitCode to 1 for unknown command", async () => {
+    process.argv = ["node", "cli.js", "xyzzy"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBe(1);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("suggests closest match for typo", async () => {
+    process.argv = ["node", "cli.js", "iniit"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBe(1);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Did you mean"));
+  });
+
+  it("does not suggest when distance exceeds threshold", async () => {
+    process.argv = ["node", "cli.js", "zzzzzzzzz"];
+    vi.resetModules();
+    await import("./cli.js");
+    expect(process.exitCode).toBe(1);
+    // Should NOT include "Did you mean" since no close match
+    const calls = vi.mocked(console.error).mock.calls.flat().join(" ");
+    expect(calls).toContain("Unknown command");
+    expect(calls).not.toContain("Did you mean");
   });
 });

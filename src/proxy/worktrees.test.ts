@@ -23,9 +23,31 @@ const configMock = {
 
 vi.mock("./config.js", () => configMock);
 
+// Capture subscribe/getSnapshot args passed to useSyncExternalStore
+let capturedSubscribe: ((cb: () => void) => () => void) | null = null;
+let capturedGetSnapshot: (() => unknown) | null = null;
+
+vi.mock("react", () => ({
+  useSyncExternalStore: (
+    subscribe: (cb: () => void) => () => void,
+    getSnapshot: () => unknown,
+    _getServerSnapshot?: () => unknown,
+  ) => {
+    capturedSubscribe = subscribe;
+    capturedGetSnapshot = getSnapshot;
+    return getSnapshot();
+  },
+}));
+
 // Now import after mocks are in place
-const { __testing, getWorktreeTarget, loadRegistry, stopRegistry, getActiveWorktrees } =
-  await import("./worktrees.js");
+const {
+  __testing,
+  getWorktreeTarget,
+  loadRegistry,
+  stopRegistry,
+  getActiveWorktrees,
+  useWorktrees,
+} = await import("./worktrees.js");
 
 const { isValidEntry, readRegistry, readProjectWorktrees } = __testing;
 
@@ -373,5 +395,70 @@ describe("loadRegistry / stopRegistry", () => {
     loadRegistry();
 
     expect(fsMock.watch).not.toHaveBeenCalled();
+  });
+
+  it("catches when watch() throws (directory doesn't exist)", () => {
+    const project = makeProject();
+    configMock.config.projects = [project];
+    fsMock.existsSync.mockReturnValue(true);
+    fsMock.readFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+    fsMock.watch.mockImplementation(() => {
+      throw new Error("ENOENT: no such file or directory");
+    });
+
+    // Should not throw — the catch block silently ignores the error
+    expect(() => {
+      loadRegistry();
+    }).not.toThrow();
+    // No watcher was pushed since watch() threw before returning
+    expect(__testing.watchers.length).toBe(0);
+  });
+});
+
+// ── useWorktrees / subscribe / getSnapshot ─────────────────
+
+describe("useWorktrees", () => {
+  it("returns current worktreeMap via useSyncExternalStore", () => {
+    __testing.worktreeMap = new Map([["feat", { port: 3000 }]]);
+
+    const result = useWorktrees();
+    expect(result).toBe(__testing.worktreeMap);
+  });
+
+  it("subscribe returns an unsubscribe function that removes the listener", () => {
+    // Call useWorktrees to capture the subscribe function
+    useWorktrees();
+
+    expect(capturedSubscribe).not.toBeNull();
+
+    const listener = vi.fn();
+    const unsubscribe = capturedSubscribe!(listener);
+
+    // Trigger notify via readRegistry
+    const project = makeProject();
+    configMock.config.projects = [project];
+    fsMock.existsSync.mockReturnValue(true);
+    fsMock.readFileSync.mockReturnValue(
+      JSON.stringify({ worktrees: { feat: { port: 4000 } } }),
+    );
+
+    readRegistry();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // Unsubscribe
+    unsubscribe();
+
+    readRegistry();
+    // Should not have been called again after unsubscribe
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("getSnapshot returns current worktreeMap reference", () => {
+    useWorktrees();
+    expect(capturedGetSnapshot).not.toBeNull();
+
+    __testing.worktreeMap = new Map([["main", { port: 8080 }]]);
+    const snapshot = capturedGetSnapshot!();
+    expect(snapshot).toBe(__testing.worktreeMap);
   });
 });

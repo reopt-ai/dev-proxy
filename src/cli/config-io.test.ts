@@ -27,6 +27,8 @@ import {
   generateEnvContent,
   readGlobalConfig,
   writeGlobalConfig,
+  readProjectConfig,
+  writeProjectConfig,
 } from "./config-io.js";
 
 describe("isValidPort", () => {
@@ -230,5 +232,71 @@ describe("writeGlobalConfig", () => {
       "/mock/.dev-proxy/config.json.tmp",
       "/mock/.dev-proxy/config.json",
     );
+  });
+});
+
+// ── readProjectConfig / writeProjectConfig ──────────────────
+
+describe("readProjectConfig", () => {
+  beforeEach(() => {
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+    mockWriteFileSync.mockReset();
+    mockMkdirSync.mockReset();
+    mockRenameSync.mockReset();
+  });
+
+  it("returns parsed config when file exists", () => {
+    mockExistsSync.mockReturnValue(true);
+    const data = { routes: { api: "http://localhost:4000" }, worktrees: {} };
+    mockReadFileSync.mockReturnValue(JSON.stringify(data));
+    const cfg = readProjectConfig("/projects/app");
+    expect(cfg).toEqual(data);
+  });
+
+  it("returns empty object when file does not exist", () => {
+    mockExistsSync.mockReturnValue(false);
+    const cfg = readProjectConfig("/projects/app");
+    expect(cfg).toEqual({});
+    expect(mockReadFileSync).not.toHaveBeenCalled();
+  });
+
+  it("returns empty object and warns on parse error", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue("{invalid json!!!");
+    const cfg = readProjectConfig("/projects/app");
+    expect(cfg).toEqual({});
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("Failed to parse"));
+  });
+});
+
+describe("writeProjectConfig", () => {
+  beforeEach(() => {
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+    mockWriteFileSync.mockReset();
+    mockMkdirSync.mockReset();
+    mockRenameSync.mockReset();
+  });
+
+  it("writes config to project path with atomic write", () => {
+    const cfg = { routes: { web: "http://localhost:3000" } };
+    writeProjectConfig("/projects/app", cfg);
+    // Should write to temp file
+    const tmpPath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+    expect(tmpPath).toBe("/projects/app/.dev-proxy.json.tmp");
+    // Then rename to final path
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      "/projects/app/.dev-proxy.json.tmp",
+      "/projects/app/.dev-proxy.json",
+    );
+  });
+
+  it("writes pretty-printed JSON with trailing newline", () => {
+    const cfg = { routes: { api: "http://localhost:4000" } };
+    writeProjectConfig("/projects/app", cfg);
+    const written = mockWriteFileSync.mock.calls[0]?.[1] as string;
+    const expected = JSON.stringify(cfg, null, 2) + "\n";
+    expect(written).toBe(expected);
   });
 });

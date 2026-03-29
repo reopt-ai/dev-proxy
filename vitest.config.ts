@@ -19,10 +19,10 @@ export default defineConfig({
         "src/proxy/types.ts",
       ],
       thresholds: {
-        lines: 64,
+        lines: 90,
         branches: 85,
-        functions: 78,
-        statements: 64,
+        functions: 86,
+        statements: 90,
       },
     },
   },
