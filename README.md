@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@reopt-ai/dev-proxy)](https://www.npmjs.com/package/@reopt-ai/dev-proxy)
 [![CI](https://github.com/reopt-ai/dev-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/reopt-ai/dev-proxy/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/reopt-ai/dev-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/reopt-ai/dev-proxy)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen.svg)](https://nodejs.org)
 
