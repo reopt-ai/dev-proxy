@@ -432,7 +432,7 @@ describe("useWorktrees", () => {
     expect(capturedSubscribe).not.toBeNull();
 
     const listener = vi.fn();
-    const unsubscribe = capturedSubscribe!(listener);
+    const unsubscribe = (capturedSubscribe as (cb: () => void) => () => void)(listener);
 
     // Trigger notify via readRegistry
     const project = makeProject();
@@ -458,7 +458,7 @@ describe("useWorktrees", () => {
     expect(capturedGetSnapshot).not.toBeNull();
 
     __testing.worktreeMap = new Map([["main", { port: 8080 }]]);
-    const snapshot = capturedGetSnapshot!();
+    const snapshot = (capturedGetSnapshot as () => Map<string, unknown>)();
     expect(snapshot).toBe(__testing.worktreeMap);
   });
 });

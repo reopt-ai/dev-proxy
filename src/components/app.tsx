@@ -59,7 +59,7 @@ function tokensLength(tokens: HeaderToken[]): number {
 function hitToken(tokens: HeaderToken[], col: number): HeaderToken | null {
   let cursor = 1;
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
+    const token = tokens[i] as HeaderToken;
     const start = cursor;
     const end = start + token.text.length - 1;
     if (col >= start && col <= end) return token;
@@ -107,7 +107,7 @@ function resolveReplayTarget(
 
 function copyToClipboard(text: string): boolean {
   for (const [command, ...args] of CLIPBOARD_COMMANDS) {
-    const result = spawnSync(command!, args, {
+    const result = spawnSync(command as string, args, {
       input: text,
       stdio: ["pipe", "ignore", "ignore"],
     });

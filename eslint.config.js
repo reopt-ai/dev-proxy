@@ -64,7 +64,8 @@ export default tseslint.config(
       "no-var": "error",
 
       // Relaxations for Ink/React TUI patterns
-      "@typescript-eslint/no-non-null-assertion": "warn",
+      "@typescript-eslint/no-non-null-assertion": "error",
+      "@typescript-eslint/non-nullable-type-assertion-style": "off",
       "@typescript-eslint/restrict-template-expressions": [
         "error",
         { allowNumber: true, allowBoolean: true },

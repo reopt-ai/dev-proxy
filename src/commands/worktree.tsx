@@ -195,7 +195,7 @@ function WorktreeCreate({ branch }: { branch: string }) {
   const worktrees = cfg.worktrees ?? {};
 
   if (branch in worktrees) {
-    const existing = worktrees[branch]!;
+    const existing = worktrees[branch] as WorktreeEntry;
     const portInfo =
       "ports" in existing
         ? Object.entries(existing.ports)
@@ -237,11 +237,11 @@ function WorktreeCreate({ branch }: { branch: string }) {
   if (serviceNames) {
     portsMap = {};
     for (let i = 0; i < serviceNames.length; i++) {
-      portsMap[serviceNames[i]!] = allocated[i]!;
+      portsMap[serviceNames[i] as string] = allocated[i] as number;
     }
     worktreeEntry = { ports: portsMap };
   } else {
-    worktreeEntry = { port: allocated[0]! };
+    worktreeEntry = { port: allocated[0] as number };
   }
 
   // Resolve directory
@@ -396,7 +396,7 @@ function WorktreeDestroy({ branch }: { branch: string }) {
   }
 
   // Update config
-  const removed = worktrees[branch]!;
+  const removed = worktrees[branch] as WorktreeEntry;
   const { [branch]: _, ...remaining } = worktrees;
   cfg.worktrees = remaining;
   try {

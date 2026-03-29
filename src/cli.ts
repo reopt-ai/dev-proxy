@@ -71,12 +71,19 @@ export function levenshtein(a: string, b: string): number {
     Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
   );
   for (let i = 1; i <= m; i++) {
+    const row = dp[i] as number[];
+    const prevRow = dp[i - 1] as number[];
     for (let j = 1; j <= n; j++) {
-      dp[i]![j] =
+      row[j] =
         a[i - 1] === b[j - 1]
-          ? dp[i - 1]![j - 1]!
-          : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
+          ? (prevRow[j - 1] as number)
+          : 1 +
+            Math.min(
+              prevRow[j] as number,
+              row[j - 1] as number,
+              prevRow[j - 1] as number,
+            );
     }
   }
-  return dp[m]![n]!;
+  return (dp[m] as number[])[n] as number;
 }
