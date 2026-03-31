@@ -18,7 +18,7 @@ vi.mock("../cli/output.js", () => ({
 }));
 
 const { __testing } = await import("./status.js");
-const { formatTarget } = __testing;
+const { formatTarget, projectLabel } = __testing;
 
 describe("formatTarget", () => {
   it("strips protocol for localhost http targets", () => {
@@ -37,5 +37,19 @@ describe("formatTarget", () => {
     expect(formatTarget("not-a-url")).toBe("not-a-url");
     expect(formatTarget("")).toBe("");
     expect(formatTarget("just some text")).toBe("just some text");
+  });
+});
+
+describe("projectLabel", () => {
+  it("returns basename of absolute path", () => {
+    expect(projectLabel("/Users/eric/reopt-ai/reopt")).toBe("reopt");
+  });
+
+  it("returns basename of nested path", () => {
+    expect(projectLabel("/projects/my-app")).toBe("my-app");
+  });
+
+  it("handles single directory name", () => {
+    expect(projectLabel("my-project")).toBe("my-project");
   });
 });

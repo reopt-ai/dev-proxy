@@ -45,7 +45,14 @@ vi.mock("./config.js", () => ({
 }));
 
 // Now import after mocks are in place
-const { parseHost, getTarget, getRoutes, getDefaultTarget } = await import("./routes.js");
+const {
+  parseHost,
+  getTarget,
+  getRoutes,
+  getDefaultTarget,
+  getRoutesByProject,
+  rebuildRoutes,
+} = await import("./routes.js");
 
 // ── Test setup ─────────────────────────────────────────────
 
@@ -364,5 +371,141 @@ describe("getTarget", () => {
     expect(result.worktree).toBeNull();
     expect(result.url).not.toBeNull();
     expect(result.url?.origin).toBe("http://localhost:4001");
+  });
+});
+
+// ── getRoutesByProject ───────────────────────────────────────
+
+describe("getRoutesByProject", () => {
+  it("groups routes by project with label from basename", () => {
+    const groups = getRoutesByProject();
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.label).toBe("alpha");
+    expect(groups[1]?.label).toBe("beta");
+  });
+
+  it("includes only non-wildcard routes in each group", () => {
+    const groups = getRoutesByProject();
+    const alpha = groups.find((g) => g.label === "alpha");
+    expect(alpha?.routes).toHaveProperty("studio");
+    expect(alpha?.routes).toHaveProperty("api");
+    expect(alpha?.routes).not.toHaveProperty("*");
+  });
+
+  it("excludes projects with no valid routes", async () => {
+    vi.doMock("./config.js", () => ({
+      config: {
+        domain: "test.dev",
+        port: 3000,
+        httpsPort: 3443,
+        projects: [
+          {
+            path: "/projects/empty",
+            configPath: "/projects/empty/.dev-proxy.json",
+            routes: { "*": "http://localhost:5000" },
+            worktrees: {},
+          },
+        ],
+      },
+    }));
+
+    vi.resetModules();
+    const mod = await import("./routes.js");
+    expect(mod.getRoutesByProject()).toHaveLength(0);
+
+    vi.doUnmock("./config.js");
+  });
+});
+
+// ── rebuildRoutes ────────────────────────────────────────────
+
+describe("rebuildRoutes", () => {
+  it("rebuilds routes from current config state", () => {
+    // Mutate the mock config to simulate a reload
+    mockConfig.projects = [
+      {
+        path: "/projects/alpha",
+        configPath: "/projects/alpha/.dev-proxy.json",
+        routes: { newapp: "http://localhost:9000" },
+        worktrees: {},
+      },
+    ];
+
+    rebuildRoutes();
+
+    expect(getRoutes()).toEqual({ newapp: "http://localhost:9000" });
+    expect(getDefaultTarget()).toBeNull();
+    expect(getRoutesByProject()).toHaveLength(1);
+    expect(getRoutesByProject()[0]?.routes).toHaveProperty("newapp");
+
+    // Restore original config for other tests
+    mockConfig.projects = [
+      {
+        path: "/projects/alpha",
+        configPath: "/projects/alpha/.dev-proxy.json",
+        routes: {
+          studio: "http://localhost:4000",
+          api: "http://localhost:4001",
+          "*": "http://localhost:5000",
+        },
+        worktrees: {},
+      },
+      {
+        path: "/projects/beta",
+        configPath: "/projects/beta/.dev-proxy.json",
+        routes: {
+          blog: "http://localhost:6000",
+          api: "http://localhost:6001",
+          "*": "http://localhost:7000",
+        },
+        worktrees: {},
+      },
+    ];
+    rebuildRoutes();
+  });
+
+  it("updates getTarget() to use new routes after rebuild", () => {
+    mockConfig.projects = [
+      {
+        path: "/projects/rebuilt",
+        configPath: "/projects/rebuilt/.dev-proxy.json",
+        routes: { fresh: "http://localhost:7777" },
+        worktrees: {},
+      },
+    ];
+
+    rebuildRoutes();
+
+    const result = getTarget("fresh.test.dev:3000");
+    expect(result.url?.origin).toBe("http://localhost:7777");
+
+    // Old route should no longer resolve (no wildcard)
+    const old = getTarget("studio.test.dev:3000");
+    expect(old.url).toBeNull();
+
+    // Restore
+    mockConfig.projects = [
+      {
+        path: "/projects/alpha",
+        configPath: "/projects/alpha/.dev-proxy.json",
+        routes: {
+          studio: "http://localhost:4000",
+          api: "http://localhost:4001",
+          "*": "http://localhost:5000",
+        },
+        worktrees: {},
+      },
+      {
+        path: "/projects/beta",
+        configPath: "/projects/beta/.dev-proxy.json",
+        routes: {
+          blog: "http://localhost:6000",
+          api: "http://localhost:6001",
+          "*": "http://localhost:7000",
+        },
+        worktrees: {},
+      },
+    ];
+    rebuildRoutes();
   });
 });
