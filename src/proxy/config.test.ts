@@ -14,8 +14,9 @@ vi.mock("node:fs", () => ({
 }));
 
 // Now import after mocks are in place
-const { __testing, CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME } =
-  await import("./config.js");
+const mod = await import("./config.js");
+const { __testing, CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME, reloadConfig } =
+  mod;
 
 const { parsePort, resolveFilePath, loadJson, loadProjectConfig, loadConfig } = __testing;
 
@@ -283,5 +284,34 @@ describe("loadConfig", () => {
       routes: projectConfig.routes,
       worktrees: {},
     });
+  });
+});
+
+// ── reloadConfig ──────────────────────────────────────────────
+
+describe("reloadConfig", () => {
+  it("updates the live config singleton", () => {
+    const globalConfig = { domain: "reloaded.test", port: 7777, httpsPort: 7443 };
+
+    fsMock.existsSync.mockImplementation((p: string) => p === GLOBAL_CONFIG_PATH);
+    fsMock.readFileSync.mockReturnValue(JSON.stringify(globalConfig));
+
+    const result = reloadConfig();
+
+    expect(result.domain).toBe("reloaded.test");
+    expect(result.port).toBe(7777);
+    // Verify the live singleton is updated
+    expect(mod.config.domain).toBe("reloaded.test");
+    expect(mod.config.port).toBe(7777);
+  });
+
+  it("returns default values after reload with missing config", () => {
+    fsMock.existsSync.mockReturnValue(false);
+
+    const result = reloadConfig();
+
+    expect(result.domain).toBe("localhost");
+    expect(result.port).toBe(3000);
+    expect(mod.config).toBe(result);
   });
 });

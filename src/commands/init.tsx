@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { render, Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { existsSync, mkdirSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
 import { platform } from "node:os";
 import { execFileSync } from "node:child_process";
+import type { RawGlobalConfig } from "../cli/config-io.js";
 import {
   CONFIG_DIR,
   GLOBAL_CONFIG_PATH,
@@ -32,6 +33,108 @@ type Step =
   | "confirm"
   | "done";
 
+// ── Validators ──────────────────────────────────────────────
+
+function validatePort(value: string): string | null {
+  const num = parseInt(value, 10);
+  if (!isValidPort(num)) return `Invalid port "${value}" — must be 1-65535`;
+  return null;
+}
+
+function validateProjectPath(value: string): string | null {
+  const abs = isAbsolute(value) ? value : resolve(process.cwd(), value);
+  if (!existsSync(abs)) return `Path does not exist: ${abs}`;
+  return null;
+}
+
+// ── Pure logic ──────────────────────────────────────────────
+
+type ParseRouteResult =
+  | { ok: true; sub: string; port: string }
+  | { ok: false; done: true }
+  | { ok: false; done?: false; error: string };
+
+function parseRouteInput(value: string, existing: Route[]): ParseRouteResult {
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: false, done: true };
+
+  const eq = trimmed.indexOf("=");
+  if (eq === -1) {
+    return { ok: false, error: "Expected format: subdomain=port (e.g. api=4000)" };
+  }
+
+  const sub = trimmed.slice(0, eq).trim();
+  if (!isValidSubdomain(sub)) {
+    return {
+      ok: false,
+      error: `Invalid subdomain "${sub}" — use lowercase alphanumeric and hyphens only`,
+    };
+  }
+  if (existing.some((r) => r.subdomain === sub)) {
+    return { ok: false, error: `Subdomain "${sub}" already added` };
+  }
+
+  const portStr = trimmed.slice(eq + 1).trim();
+  const portNum = parseInt(portStr, 10);
+  if (!isValidPort(portNum)) {
+    return { ok: false, error: `Invalid port "${portStr}" — must be 1-65535` };
+  }
+
+  return { ok: true, sub, port: portStr };
+}
+
+interface BuildGlobalConfigInput {
+  domain: string;
+  httpPort: string;
+  httpsPort: string;
+  absPath: string;
+}
+
+interface BuildGlobalConfigResult {
+  config: { domain: string; port: number; httpsPort: number; projects: string[] };
+  message: string;
+}
+
+function buildGlobalConfig(
+  input: BuildGlobalConfigInput,
+  existing: RawGlobalConfig | null,
+): BuildGlobalConfigResult {
+  if (existing) {
+    const config = {
+      domain: existing.domain ?? input.domain,
+      port: existing.port ?? parseInt(input.httpPort, 10),
+      httpsPort: existing.httpsPort ?? parseInt(input.httpsPort, 10),
+      projects: [...(existing.projects ?? [])],
+    };
+    if (!config.projects.includes(input.absPath)) {
+      config.projects.push(input.absPath);
+      return { config, message: "added" };
+    }
+    return { config, message: "already-registered" };
+  }
+
+  return {
+    config: {
+      domain: input.domain,
+      port: parseInt(input.httpPort, 10),
+      httpsPort: parseInt(input.httpsPort, 10),
+      projects: [input.absPath],
+    },
+    message: "created",
+  };
+}
+
+function buildRouteMap(routes: Route[], wildcard: string): Record<string, string> {
+  const routeMap: Record<string, string> = {};
+  for (const r of routes) {
+    routeMap[r.subdomain] = `http://localhost:${r.port}`;
+  }
+  if (wildcard) {
+    routeMap["*"] = `http://localhost:${wildcard}`;
+  }
+  return routeMap;
+}
+
 // ── Completed Step Display ───────────────────────────────────
 
 function CompletedStep({ label, value }: { label: string; value: string }) {
@@ -48,9 +151,11 @@ function CompletedStep({ label, value }: { label: string; value: string }) {
 // ── Route Input ──────────────────────────────────────────────
 
 function RouteInput({
+  existing,
   onAdd,
   onDone,
 }: {
+  existing: Route[];
   onAdd: (sub: string, port: string) => void;
   onDone: () => void;
 }) {
@@ -69,32 +174,16 @@ function RouteInput({
             setError("");
           }}
           onSubmit={(v) => {
-            const trimmed = v.trim();
-            if (!trimmed) {
+            const result = parseRouteInput(v, existing);
+            if (result.ok) {
+              onAdd(result.sub, result.port);
+              setValue("");
+              setError("");
+            } else if (result.done) {
               onDone();
-              return;
+            } else {
+              setError(result.error);
             }
-            const eq = trimmed.indexOf("=");
-            if (eq === -1) {
-              setError("Expected format: subdomain=port (e.g. api=4000)");
-              return;
-            }
-            const sub = trimmed.slice(0, eq).trim();
-            if (!isValidSubdomain(sub)) {
-              setError(
-                `Invalid subdomain "${sub}" — use lowercase alphanumeric and hyphens only`,
-              );
-              return;
-            }
-            const portStr = trimmed.slice(eq + 1).trim();
-            const portNum = parseInt(portStr, 10);
-            if (!isValidPort(portNum)) {
-              setError(`Invalid port "${portStr}" — must be 1-65535`);
-              return;
-            }
-            onAdd(sub, portStr);
-            setValue("");
-            setError("");
           }}
         />
       </Box>
@@ -114,27 +203,49 @@ function Prompt({
   label,
   defaultValue,
   onSubmit,
+  validate,
 }: {
   label: string;
   defaultValue?: string;
   onSubmit: (value: string) => void;
+  validate?: (value: string) => string | null;
 }) {
   const [value, setValue] = useState("");
+  const [error, setError] = useState("");
 
   return (
-    <Box>
-      <Text>{"  "}</Text>
-      <Text bold>{label}</Text>
-      {defaultValue && <Text dimColor>{` (${defaultValue})`}</Text>}
-      <Text>{": "}</Text>
-      <TextInput
-        value={value}
-        onChange={setValue}
-        onSubmit={(v) => {
-          const trimmed = v.trim();
-          onSubmit(trimmed ? trimmed : (defaultValue ?? ""));
-        }}
-      />
+    <Box flexDirection="column">
+      <Box>
+        <Text>{"  "}</Text>
+        <Text bold>{label}</Text>
+        {defaultValue && <Text dimColor>{` (${defaultValue})`}</Text>}
+        <Text>{": "}</Text>
+        <TextInput
+          value={value}
+          onChange={(v) => {
+            setValue(v);
+            setError("");
+          }}
+          onSubmit={(v) => {
+            const trimmed = v.trim();
+            const resolved = trimmed !== "" ? trimmed : (defaultValue ?? "");
+            if (validate) {
+              const err = validate(resolved);
+              if (err) {
+                setError(err);
+                return;
+              }
+            }
+            onSubmit(resolved);
+          }}
+        />
+      </Box>
+      {error && (
+        <Text color="red">
+          {"      "}
+          {error}
+        </Text>
+      )}
     </Box>
   );
 }
@@ -167,10 +278,17 @@ function ConfirmOverwrite({
 // ── Main Wizard ──────────────────────────────────────────────
 
 function InitWizard() {
-  const [step, setStep] = useState<Step>("domain");
-  const [domain, setDomain] = useState("");
-  const [httpPort, setHttpPort] = useState("");
-  const [httpsPort, setHttpsPort] = useState("");
+  const existing = readGlobalConfig();
+  const hasGlobal = existsSync(GLOBAL_CONFIG_PATH) && existing.domain;
+
+  const [step, setStep] = useState<Step>(hasGlobal ? "projectPath" : "domain");
+  const [domain, setDomain] = useState(hasGlobal ? (existing.domain ?? "") : "");
+  const [httpPort, setHttpPort] = useState(
+    hasGlobal ? String(existing.port ?? 3000) : "",
+  );
+  const [httpsPort, setHttpsPort] = useState(
+    hasGlobal ? String(existing.httpsPort ?? 3443) : "",
+  );
   const [projectPath, setProjectPath] = useState("");
   const [routes, setRoutes] = useState<Route[]>([]);
   const [wildcard, setWildcard] = useState("");
@@ -192,35 +310,25 @@ function InitWizard() {
       ? projectPath
       : resolve(process.cwd(), projectPath);
 
-    let globalConfig: {
-      domain: string;
-      port: number;
-      httpsPort: number;
-      projects: string[];
-    };
-    const existing = readGlobalConfig();
-    if (existsSync(GLOBAL_CONFIG_PATH)) {
-      globalConfig = {
-        domain: existing.domain ?? domain,
-        port: existing.port ?? parseInt(httpPort, 10),
-        httpsPort: existing.httpsPort ?? parseInt(httpsPort, 10),
-        projects: existing.projects ?? [],
-      };
-      if (!globalConfig.projects.includes(absPath)) {
-        globalConfig.projects.push(absPath);
+    const currentGlobal = readGlobalConfig();
+    const hasExisting = existsSync(GLOBAL_CONFIG_PATH);
+    const { config: globalConfig, message: globalMsg } = buildGlobalConfig(
+      { domain, httpPort, httpsPort, absPath },
+      hasExisting ? currentGlobal : null,
+    );
+
+    switch (globalMsg) {
+      case "added":
         addMessage(`Added project to ${GLOBAL_CONFIG_PATH}`);
-      } else {
+        break;
+      case "already-registered":
         addMessage(`Project already registered`);
-      }
-    } else {
-      globalConfig = {
-        domain,
-        port: parseInt(httpPort, 10),
-        httpsPort: parseInt(httpsPort, 10),
-        projects: [absPath],
-      };
-      addMessage(`Created ${GLOBAL_CONFIG_PATH}`);
+        break;
+      case "created":
+        addMessage(`Created ${GLOBAL_CONFIG_PATH}`);
+        break;
     }
+
     try {
       writeGlobalConfig(globalConfig);
     } catch (err) {
@@ -229,13 +337,7 @@ function InitWizard() {
 
     // Project config
     const projectConfigPath = resolve(absPath, PROJECT_CONFIG_NAME);
-    const routeMap: Record<string, string> = {};
-    for (const r of routes) {
-      routeMap[r.subdomain] = `http://localhost:${r.port}`;
-    }
-    if (wildcard) {
-      routeMap["*"] = `http://localhost:${wildcard}`;
-    }
+    const routeMap = buildRouteMap(routes, wildcard);
 
     if (!existsSync(projectConfigPath) || overwriteProject) {
       try {
@@ -251,8 +353,8 @@ function InitWizard() {
     setStep("done");
   };
 
-  // DNS + mkcert info for done screen
-  const hasMkcert = (() => {
+  // DNS + mkcert info for done screen — only computed once
+  const hasMkcert = useMemo(() => {
     try {
       execFileSync("which", ["mkcert"], { stdio: "ignore" });
       return true;
@@ -260,7 +362,7 @@ function InitWizard() {
       // Expected: mkcert is simply not installed
       return false;
     }
-  })();
+  }, []);
 
   const absProjectPath = projectPath
     ? isAbsolute(projectPath)
@@ -269,6 +371,10 @@ function InitWizard() {
     : "";
   const projectConfigExists =
     absProjectPath && existsSync(resolve(absProjectPath, PROJECT_CONFIG_NAME));
+
+  // Check if project is already registered in global config
+  const isAlreadyRegistered =
+    absProjectPath && (existing.projects ?? []).includes(absProjectPath);
 
   return (
     <Box flexDirection="column" paddingTop={1} paddingBottom={1}>
@@ -287,6 +393,13 @@ function InitWizard() {
       )}
       {projectPath && step !== "projectPath" && (
         <CompletedStep label="Project" value={absProjectPath} />
+      )}
+      {isAlreadyRegistered && step === "routes" && (
+        <Text>
+          {"  "}
+          <Text color="yellow">{"\u26A0"}</Text>
+          <Text dimColor>{" Project already registered — routes will be updated"}</Text>
+        </Text>
       )}
       {routes.length > 0 && step !== "routes" && (
         <Box flexDirection="column">
@@ -315,9 +428,8 @@ function InitWizard() {
         <Prompt
           label="HTTP port"
           defaultValue="3000"
+          validate={validatePort}
           onSubmit={(v) => {
-            const num = parseInt(v, 10);
-            if (!isValidPort(num)) return;
             setHttpPort(v);
             setStep("httpsPort");
           }}
@@ -328,9 +440,8 @@ function InitWizard() {
         <Prompt
           label="HTTPS port"
           defaultValue="3443"
+          validate={validatePort}
           onSubmit={(v) => {
-            const num = parseInt(v, 10);
-            if (!isValidPort(num)) return;
             setHttpsPort(v);
             setStep("projectPath");
           }}
@@ -341,6 +452,7 @@ function InitWizard() {
         <Prompt
           label="Project path"
           defaultValue={process.cwd()}
+          validate={validateProjectPath}
           onSubmit={(v) => {
             setProjectPath(v);
             setStep("routes");
@@ -360,6 +472,7 @@ function InitWizard() {
             </Text>
           ))}
           <RouteInput
+            existing={routes}
             onAdd={(sub, port) => {
               setRoutes((prev) => [...prev, { subdomain: sub, port }]);
             }}
@@ -475,3 +588,11 @@ function InitWizard() {
 }
 
 render(<InitWizard />);
+
+export const __testing = {
+  validatePort,
+  validateProjectPath,
+  parseRouteInput,
+  buildGlobalConfig,
+  buildRouteMap,
+};
