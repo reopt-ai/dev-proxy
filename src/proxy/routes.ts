@@ -187,3 +187,5 @@ function getSnapshot(): RouteSnapshot {
 export function useRouteSnapshot(): RouteSnapshot {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
+
+export const __testing = { subscribe, getSnapshot };

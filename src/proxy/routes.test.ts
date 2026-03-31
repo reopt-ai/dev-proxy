@@ -48,10 +48,12 @@ vi.mock("./config.js", () => ({
 const {
   parseHost,
   getTarget,
+  getDomain,
   getRoutes,
   getDefaultTarget,
   getRoutesByProject,
   rebuildRoutes,
+  __testing: routesTesting,
 } = await import("./routes.js");
 
 // ── Test setup ─────────────────────────────────────────────
@@ -130,6 +132,10 @@ describe("parseHost", () => {
 // ── Route parsing (module-level config → parsedRoutes) ─────
 
 describe("route parsing", () => {
+  it("exposes domain via getDomain()", () => {
+    expect(getDomain()).toBe("test.dev");
+  });
+
   it("parses routes from a single project correctly", () => {
     // "studio" and "api" come from the first project
     expect(getRoutes().studio).toBe("http://localhost:4000");
@@ -507,5 +513,36 @@ describe("rebuildRoutes", () => {
       },
     ];
     rebuildRoutes();
+  });
+});
+
+// ── subscribe / getSnapshot ──────────────────────────────────
+
+describe("subscribe and getSnapshot", () => {
+  it("getSnapshot returns current route snapshot", () => {
+    const snap = routesTesting.getSnapshot();
+    expect(snap.domain).toBe("test.dev");
+    expect(snap.routes).toHaveProperty("studio");
+    expect(snap.defaultTarget).toBe("http://localhost:5000");
+    expect(snap.byProject.length).toBeGreaterThan(0);
+  });
+
+  it("subscribe notifies listener on rebuildRoutes", () => {
+    const listener = vi.fn();
+    const unsubscribe = routesTesting.subscribe(listener);
+
+    rebuildRoutes();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+  });
+
+  it("unsubscribe stops notifications", () => {
+    const listener = vi.fn();
+    const unsubscribe = routesTesting.subscribe(listener);
+    unsubscribe();
+
+    rebuildRoutes();
+    expect(listener).not.toHaveBeenCalled();
   });
 });
