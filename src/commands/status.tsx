@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { Box, Text, render } from "ink";
 import { config } from "../proxy/config.js";
 import { Header, Section, Row, RouteRow, ExitOnRender } from "../cli/output.js";
@@ -14,21 +15,37 @@ function formatTarget(target: string): string {
   return target;
 }
 
+function projectLabel(path: string): string {
+  return basename(path);
+}
+
 function Status() {
-  const allRoutes: { sub: string; target: string }[] = [];
+  const routesByProject: {
+    project: string;
+    routes: { sub: string; target: string }[];
+  }[] = [];
   const allWorktrees: {
     name: string;
+    project: string;
     entry: { ports: Record<string, number> } | { port: number };
   }[] = [];
 
+  let totalRoutes = 0;
   for (const project of config.projects) {
+    const routes: { sub: string; target: string }[] = [];
     for (const [sub, target] of Object.entries(project.routes)) {
-      allRoutes.push({ sub, target: formatTarget(target) });
+      routes.push({ sub, target: formatTarget(target) });
+    }
+    if (routes.length > 0) {
+      routesByProject.push({ project: project.path, routes });
+      totalRoutes += routes.length;
     }
     for (const [name, wt] of Object.entries(project.worktrees)) {
-      allWorktrees.push({ name, entry: wt });
+      allWorktrees.push({ name, project: project.path, entry: wt });
     }
   }
+
+  const multiProject = config.projects.length > 1;
 
   return (
     <Box flexDirection="column">
@@ -42,10 +59,21 @@ function Status() {
         <Row label="HTTPS" value={`:${String(config.httpsPort)}`} />
       </Box>
 
-      <Section title={`Routes (${String(allRoutes.length)})`}>
-        {allRoutes.map((r) => (
-          <RouteRow key={`${r.sub}-${r.target}`} sub={r.sub} target={r.target} />
-        ))}
+      <Section title={`Routes (${String(totalRoutes)})`}>
+        {multiProject
+          ? routesByProject.map((g) => (
+              <Box key={g.project} flexDirection="column">
+                <Text dimColor>{`    [${projectLabel(g.project)}]`}</Text>
+                {g.routes.map((r) => (
+                  <RouteRow key={`${r.sub}-${r.target}`} sub={r.sub} target={r.target} />
+                ))}
+              </Box>
+            ))
+          : routesByProject.flatMap((g) =>
+              g.routes.map((r) => (
+                <RouteRow key={`${r.sub}-${r.target}`} sub={r.sub} target={r.target} />
+              )),
+            )}
       </Section>
 
       <Section title={`Projects (${String(config.projects.length)})`}>
@@ -72,6 +100,6 @@ function Status() {
   );
 }
 
-export const __testing = { formatTarget };
+export const __testing = { formatTarget, projectLabel };
 
 render(<Status />);
