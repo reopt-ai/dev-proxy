@@ -45,7 +45,7 @@ vi.mock("./config.js", () => ({
 }));
 
 // Now import after mocks are in place
-const { parseHost, getTarget, ROUTES, DEFAULT_TARGET } = await import("./routes.js");
+const { parseHost, getTarget, getRoutes, getDefaultTarget } = await import("./routes.js");
 
 // ── Test setup ─────────────────────────────────────────────
 
@@ -125,13 +125,13 @@ describe("parseHost", () => {
 describe("route parsing", () => {
   it("parses routes from a single project correctly", () => {
     // "studio" and "api" come from the first project
-    expect(ROUTES.studio).toBe("http://localhost:4000");
-    expect(ROUTES.api).toBe("http://localhost:4001");
+    expect(getRoutes().studio).toBe("http://localhost:4000");
+    expect(getRoutes().api).toBe("http://localhost:4001");
   });
 
   it("first project wins for duplicate subdomain registrations", () => {
     // "api" is in both projects; alpha's port 4001 should win over beta's 6001
-    expect(ROUTES.api).toBe("http://localhost:4001");
+    expect(getRoutes().api).toBe("http://localhost:4001");
   });
 
   it("logs warning for duplicate subdomains", async () => {
@@ -169,28 +169,28 @@ describe("route parsing", () => {
   });
 
   it("stores wildcard route as fallback", () => {
-    expect(DEFAULT_TARGET).toBe("http://localhost:5000");
+    expect(getDefaultTarget()).toBe("http://localhost:5000");
   });
 
   it("first wildcard wins across multiple projects", () => {
     // Alpha's wildcard (port 5000) wins over beta's (port 7000)
-    expect(DEFAULT_TARGET).toBe("http://localhost:5000");
+    expect(getDefaultTarget()).toBe("http://localhost:5000");
   });
 
   it("registers routes from second project that are not duplicates", () => {
     // "blog" only appears in beta, so it should be registered
-    expect(ROUTES.blog).toBe("http://localhost:6000");
+    expect(getRoutes().blog).toBe("http://localhost:6000");
   });
 
-  it("does not include wildcard in ROUTES map", () => {
-    expect(ROUTES["*"]).toBeUndefined();
+  it("does not include wildcard in getRoutes() map", () => {
+    expect(getRoutes()["*"]).toBeUndefined();
   });
 
   it("only registers expected subdomains from all projects", () => {
     // Exactly three routes from both projects (alpha: studio, api; beta: blog)
     // No extras from empty or invalid entries
     const expectedKeys = ["studio", "api", "blog"];
-    expect(Object.keys(ROUTES).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(getRoutes()).sort()).toEqual(expectedKeys.sort());
   });
 });
 
@@ -222,7 +222,7 @@ describe("route parsing — invalid targets", () => {
 
     vi.resetModules();
     const mod = await import("./routes.js");
-    expect(mod.ROUTES.files).toBeUndefined();
+    expect(mod.getRoutes().files).toBeUndefined();
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('unsupported protocol "ftp:"'),
     );
@@ -251,7 +251,7 @@ describe("route parsing — invalid targets", () => {
 
     vi.resetModules();
     const mod = await import("./routes.js");
-    expect(mod.ROUTES.broken).toBeUndefined();
+    expect(mod.getRoutes().broken).toBeUndefined();
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("Ignoring /projects/bad-urls routes.broken"),
     );
@@ -278,8 +278,8 @@ describe("route parsing — invalid targets", () => {
 
     vi.resetModules();
     const mod = await import("./routes.js");
-    expect(Object.keys(mod.ROUTES)).toHaveLength(0);
-    expect(mod.DEFAULT_TARGET).toBeNull();
+    expect(Object.keys(mod.getRoutes())).toHaveLength(0);
+    expect(mod.getDefaultTarget()).toBeNull();
 
     vi.doUnmock("./config.js");
   });

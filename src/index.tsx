@@ -1,8 +1,12 @@
 process.title = "dev-proxy";
 
+import { watch } from "node:fs";
+import { basename, dirname } from "node:path";
 import { render } from "ink";
-import { createProxyServer, startProxyServer, destroyAgents } from "./proxy/server.js";
+import { reloadConfig, config, GLOBAL_CONFIG_PATH } from "./proxy/config.js";
+import { rebuildRoutes } from "./proxy/routes.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
+import { createProxyServer, startProxyServer, destroyAgents } from "./proxy/server.js";
 import { pushHttp, pushWs } from "./store.js";
 import { App } from "./components/app.js";
 
@@ -105,6 +109,54 @@ const app = render(<App httpsEnabled={httpsServer !== null} />, {
   patchConsole: false,
 });
 
+// ── Config hot-reload ───────────────────────────────────────
+const configWatchers: ReturnType<typeof watch>[] = [];
+let configDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function onConfigChange(): void {
+  if (configDebounce) clearTimeout(configDebounce);
+  configDebounce = setTimeout(() => {
+    try {
+      reloadConfig();
+      rebuildRoutes();
+    } catch {
+      /* config reload failure is non-fatal */
+    }
+  }, 150);
+}
+
+// Watch global config
+try {
+  const globalDir = dirname(GLOBAL_CONFIG_PATH);
+  const globalBase = basename(GLOBAL_CONFIG_PATH);
+  const w = watch(globalDir, (_event, filename) => {
+    if (filename === globalBase) onConfigChange();
+  });
+  w.on("error", () => {
+    /* intentional: watcher errors are non-fatal */
+  });
+  configWatchers.push(w);
+} catch {
+  /* config dir doesn't exist yet — no watcher needed */
+}
+
+// Watch each project config
+for (const project of config.projects) {
+  try {
+    const dir = dirname(project.configPath);
+    const base = basename(project.configPath);
+    const w = watch(dir, (_event, filename) => {
+      if (filename === base) onConfigChange();
+    });
+    w.on("error", () => {
+      /* intentional: watcher errors are non-fatal */
+    });
+    configWatchers.push(w);
+  } catch {
+    /* project dir doesn't exist — skip */
+  }
+}
+
 // ── Graceful shutdown ────────────────────────────────────────
 function restoreTerminal() {
   if (!altScreenActive) return;
@@ -116,6 +168,8 @@ function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
 
+  for (const w of configWatchers) w.close();
+  if (configDebounce) clearTimeout(configDebounce);
   stopRegistry();
   try {
     app.unmount();
