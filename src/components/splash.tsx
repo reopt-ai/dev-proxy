@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import {
   DOMAIN,
   ROUTES,
+  ROUTES_BY_PROJECT,
   DEFAULT_TARGET,
   PROXY_PORT,
   HTTPS_PORT,
@@ -9,8 +10,19 @@ import {
 import { useWorktrees } from "../proxy/worktrees.js";
 import { palette } from "../utils/format.js";
 
+function RouteEntry({ sub, target }: { sub: string; target: string }) {
+  return (
+    <Box gap={1}>
+      <Text color={palette.brand}>{`${sub}.${DOMAIN}`.padEnd(22)}</Text>
+      <Text color={palette.subtle}>{"\u279C"}</Text>
+      <Text color={palette.dim}>{target}</Text>
+    </Box>
+  );
+}
+
 export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
   const sorted = Object.entries(ROUTES).sort(([a], [b]) => a.localeCompare(b));
+  const multiProject = ROUTES_BY_PROJECT.length > 1;
   const worktrees = useWorktrees();
   const line = "─".repeat(44);
 
@@ -40,13 +52,20 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
 
         {/* Routes */}
         <Box flexDirection="column" marginTop={1}>
-          {sorted.map(([sub, target]) => (
-            <Box key={sub} gap={1}>
-              <Text color={palette.brand}>{`${sub}.${DOMAIN}`.padEnd(22)}</Text>
-              <Text color={palette.subtle}>{"\u279C"}</Text>
-              <Text color={palette.dim}>{target}</Text>
-            </Box>
-          ))}
+          {multiProject
+            ? ROUTES_BY_PROJECT.map((g) => (
+                <Box key={g.project} flexDirection="column">
+                  <Text color={palette.muted}>{`[${g.label}]`}</Text>
+                  {Object.entries(g.routes)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([sub, target]) => (
+                      <RouteEntry key={sub} sub={sub} target={target} />
+                    ))}
+                </Box>
+              ))
+            : sorted.map(([sub, target]) => (
+                <RouteEntry key={sub} sub={sub} target={target} />
+              ))}
           {DEFAULT_TARGET && (
             <Box gap={1}>
               <Text color={palette.muted}>{`*.${DOMAIN}`.padEnd(22)}</Text>

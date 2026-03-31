@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { config } from "./config.js";
 import { getWorktreeTarget } from "./worktrees.js";
 
@@ -23,6 +24,14 @@ function parseTarget(label: string, raw: string): URL | null {
     console.error(`[dev-proxy] Ignoring ${label}: ${(err as Error).message}`);
     return null;
   }
+}
+
+// ── Types ───────────────────────────────────────────────────
+
+export interface ProjectRouteGroup {
+  project: string;
+  label: string;
+  routes: Record<string, string>;
 }
 
 // ── Build from project configs ──────────────────────────────
@@ -58,6 +67,19 @@ export const PROXY_PORT = config.port;
 export const HTTPS_PORT = config.httpsPort;
 export const CERT_PATH = config.certPath;
 export const KEY_PATH = config.keyPath;
+
+/** Routes grouped by project — for multi-project display in TUI/status */
+export const ROUTES_BY_PROJECT: ProjectRouteGroup[] = config.projects
+  .map((project) => {
+    const routes: Record<string, string> = {};
+    for (const [sub] of Object.entries(project.routes)) {
+      if (sub === "*") continue;
+      const parsed = parsedRoutes.get(sub);
+      if (parsed) routes[sub] = formatTarget(parsed);
+    }
+    return { project: project.path, label: basename(project.path), routes };
+  })
+  .filter((g) => Object.keys(g.routes).length > 0);
 
 export interface TargetResult {
   url: URL | null;
