@@ -59,11 +59,12 @@ function checkProjectsSection(): CheckResult[] {
 
   for (const project of config.projects) {
     const exists = existsSync(project.configPath);
+    const configFile = project.configPath.split("/").pop() ?? project.configPath;
     results.push({
       ok: exists,
       label: exists
-        ? `.dev-proxy.json exists: ${project.path}`
-        : `.dev-proxy.json missing: ${project.path}`,
+        ? `${configFile} exists: ${project.path}`
+        : `config missing: ${project.path}`,
     });
 
     if (exists) {

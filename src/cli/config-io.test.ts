@@ -10,10 +10,15 @@ vi.mock("node:fs", () => ({
 }));
 
 // Re-export config constants so the module can resolve them
+const { mockResolveProjectConfigFile } = vi.hoisted(() => ({
+  mockResolveProjectConfigFile: vi.fn(),
+}));
 vi.mock("../proxy/config.js", () => ({
   CONFIG_DIR: "/mock/.dev-proxy",
   GLOBAL_CONFIG_PATH: "/mock/.dev-proxy/config.json",
   PROJECT_CONFIG_NAME: ".dev-proxy.json",
+  JS_CONFIG_NAMES: ["dev-proxy.config.js", "dev-proxy.config.mjs"],
+  resolveProjectConfigFile: mockResolveProjectConfigFile,
 }));
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
@@ -29,6 +34,9 @@ import {
   writeGlobalConfig,
   readProjectConfig,
   writeProjectConfig,
+  generateJsConfig,
+  writeJsConfig,
+  resolveProjectConfigFile,
 } from "./config-io.js";
 
 describe("isValidPort", () => {
@@ -298,5 +306,108 @@ describe("writeProjectConfig", () => {
     const written = mockWriteFileSync.mock.calls[0]?.[1] as string;
     const expected = JSON.stringify(cfg, null, 2) + "\n";
     expect(written).toBe(expected);
+  });
+});
+
+// ── generateJsConfig ────────────────────────────────────────
+
+describe("generateJsConfig", () => {
+  it("generates valid JS with JSDoc @type annotation", () => {
+    const output = generateJsConfig({ api: "http://localhost:4000" });
+    expect(output).toContain("/** @type {import('@reopt-ai/dev-proxy').Config} */");
+    expect(output).toContain("export default {");
+    expect(output).toContain("routes: {");
+  });
+
+  it("includes all route entries", () => {
+    const routes = {
+      api: "http://localhost:4000",
+      web: "http://localhost:3000",
+      "*": "http://localhost:8080",
+    };
+    const output = generateJsConfig(routes);
+    expect(output).toContain('"api": "http://localhost:4000"');
+    expect(output).toContain('"web": "http://localhost:3000"');
+    expect(output).toContain('"*": "http://localhost:8080"');
+  });
+
+  it("handles empty routes", () => {
+    const output = generateJsConfig({});
+    expect(output).toContain("routes: {");
+    expect(output).toContain("export default {");
+    // Should not have any route entries between the braces
+    expect(output).toMatch(/routes: \{\n\s*\}/);
+  });
+});
+
+// ── writeJsConfig ───────────────────────────────────────────
+
+describe("writeJsConfig", () => {
+  beforeEach(() => {
+    mockWriteFileSync.mockReset();
+    mockRenameSync.mockReset();
+  });
+
+  it("calls atomic write with correct filename (dev-proxy.config.js)", () => {
+    writeJsConfig("/projects/app", { api: "http://localhost:4000" });
+    // Should write to temp file first
+    const tmpPath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+    expect(tmpPath).toBe("/projects/app/dev-proxy.config.js.tmp");
+    // Then rename to final path
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      "/projects/app/dev-proxy.config.js.tmp",
+      "/projects/app/dev-proxy.config.js",
+    );
+  });
+});
+
+// ── resolveProjectConfigFile ────────────────────────────────
+
+describe("resolveProjectConfigFile", () => {
+  beforeEach(() => {
+    mockResolveProjectConfigFile.mockReset();
+  });
+
+  it('returns { type: "js" } when dev-proxy.config.js exists', () => {
+    mockResolveProjectConfigFile.mockReturnValue({
+      type: "js",
+      path: "/p/dev-proxy.config.js",
+    });
+    const result = resolveProjectConfigFile("/p");
+    expect(result).toEqual({ type: "js", path: "/p/dev-proxy.config.js" });
+  });
+
+  it('returns { type: "js" } when dev-proxy.config.mjs exists', () => {
+    mockResolveProjectConfigFile.mockReturnValue({
+      type: "js",
+      path: "/p/dev-proxy.config.mjs",
+    });
+    const result = resolveProjectConfigFile("/p");
+    expect(result).toEqual({ type: "js", path: "/p/dev-proxy.config.mjs" });
+  });
+
+  it('returns { type: "json" } when only .dev-proxy.json exists', () => {
+    mockResolveProjectConfigFile.mockReturnValue({
+      type: "json",
+      path: "/p/.dev-proxy.json",
+    });
+    const result = resolveProjectConfigFile("/p");
+    expect(result).toEqual({ type: "json", path: "/p/.dev-proxy.json" });
+  });
+
+  it("returns null when no config file exists", () => {
+    mockResolveProjectConfigFile.mockReturnValue(null);
+    const result = resolveProjectConfigFile("/p");
+    expect(result).toBeNull();
+  });
+
+  it("JS config takes priority over JSON", () => {
+    // When both exist, resolveProjectConfigFile should return JS
+    mockResolveProjectConfigFile.mockReturnValue({
+      type: "js",
+      path: "/p/dev-proxy.config.js",
+    });
+    const result = resolveProjectConfigFile("/p");
+    expect(result?.type).toBe("js");
   });
 });
