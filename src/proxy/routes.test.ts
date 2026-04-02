@@ -20,6 +20,7 @@ const mockConfig: ResolvedConfig = {
     {
       path: "/projects/alpha",
       configPath: "/projects/alpha/.dev-proxy.json",
+      configType: "json",
       routes: {
         studio: "http://localhost:4000",
         api: "http://localhost:4001",
@@ -30,6 +31,7 @@ const mockConfig: ResolvedConfig = {
     {
       path: "/projects/beta",
       configPath: "/projects/beta/.dev-proxy.json",
+      configType: "json",
       routes: {
         blog: "http://localhost:6000",
         api: "http://localhost:6001", // duplicate — should be ignored
@@ -159,12 +161,14 @@ describe("route parsing", () => {
           {
             path: "/projects/alpha",
             configPath: "/projects/alpha/.dev-proxy.json",
+            configType: "json",
             routes: { api: "http://localhost:4001" },
             worktrees: {},
           },
           {
             path: "/projects/beta",
             configPath: "/projects/beta/.dev-proxy.json",
+            configType: "json",
             routes: { api: "http://localhost:6001" },
             worktrees: {},
           },
@@ -226,6 +230,7 @@ describe("route parsing — invalid targets", () => {
           {
             path: "/projects/ftp-project",
             configPath: "/projects/ftp-project/.dev-proxy.json",
+            configType: "json",
             routes: { files: "ftp://fileserver:21" },
             worktrees: {},
           },
@@ -255,6 +260,7 @@ describe("route parsing — invalid targets", () => {
           {
             path: "/projects/bad-urls",
             configPath: "/projects/bad-urls/.dev-proxy.json",
+            configType: "json",
             routes: { broken: "not a valid url" },
             worktrees: {},
           },
@@ -282,6 +288,7 @@ describe("route parsing — invalid targets", () => {
           {
             path: "/projects/empty",
             configPath: "/projects/empty/.dev-proxy.json",
+            configType: "json",
             routes: {},
             worktrees: {},
           },
@@ -326,6 +333,7 @@ describe("getTarget", () => {
           {
             path: "/projects/no-wildcard",
             configPath: "/projects/no-wildcard/.dev-proxy.json",
+            configType: "json",
             routes: { app: "http://localhost:9000" },
             worktrees: {},
           },
@@ -408,6 +416,7 @@ describe("getRoutesByProject", () => {
           {
             path: "/projects/empty",
             configPath: "/projects/empty/.dev-proxy.json",
+            configType: "json",
             routes: { "*": "http://localhost:5000" },
             worktrees: {},
           },
@@ -432,6 +441,7 @@ describe("rebuildRoutes", () => {
       {
         path: "/projects/alpha",
         configPath: "/projects/alpha/.dev-proxy.json",
+        configType: "json",
         routes: { newapp: "http://localhost:9000" },
         worktrees: {},
       },
@@ -449,6 +459,7 @@ describe("rebuildRoutes", () => {
       {
         path: "/projects/alpha",
         configPath: "/projects/alpha/.dev-proxy.json",
+        configType: "json",
         routes: {
           studio: "http://localhost:4000",
           api: "http://localhost:4001",
@@ -459,6 +470,7 @@ describe("rebuildRoutes", () => {
       {
         path: "/projects/beta",
         configPath: "/projects/beta/.dev-proxy.json",
+        configType: "json",
         routes: {
           blog: "http://localhost:6000",
           api: "http://localhost:6001",
@@ -475,6 +487,7 @@ describe("rebuildRoutes", () => {
       {
         path: "/projects/rebuilt",
         configPath: "/projects/rebuilt/.dev-proxy.json",
+        configType: "json",
         routes: { fresh: "http://localhost:7777" },
         worktrees: {},
       },
@@ -494,6 +507,7 @@ describe("rebuildRoutes", () => {
       {
         path: "/projects/alpha",
         configPath: "/projects/alpha/.dev-proxy.json",
+        configType: "json",
         routes: {
           studio: "http://localhost:4000",
           api: "http://localhost:4001",
@@ -504,6 +518,7 @@ describe("rebuildRoutes", () => {
       {
         path: "/projects/beta",
         configPath: "/projects/beta/.dev-proxy.json",
+        configType: "json",
         routes: {
           blog: "http://localhost:6000",
           api: "http://localhost:6001",
