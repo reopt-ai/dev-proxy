@@ -1,4 +1,10 @@
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Real fs for creating temp test files (separate from mocked fs)
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+const realFs = await vi.importActual<typeof import("node:fs")>("node:fs");
 
 // ── Mocks ───────────────────────────────────────────────────
 // Must be set up before importing the module under test.
@@ -22,7 +28,15 @@ const mod = await import("./config.js");
 const { __testing, CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME, reloadConfig } =
   mod;
 
-const { parsePort, resolveFilePath, loadJson, loadProjectConfig, loadConfig } = __testing;
+const {
+  parsePort,
+  resolveFilePath,
+  loadJson,
+  loadProjectConfig,
+  loadConfig,
+  resolveProjectConfigFile,
+  loadJsConfig,
+} = __testing;
 
 // ── Lifecycle ──────────────────────────────────────────────
 
@@ -212,6 +226,116 @@ describe("loadProjectConfig", () => {
     expect(result).not.toBeNull();
     expect(result?.routes).toEqual({ web: "http://localhost:3000" });
     expect(result?.worktrees).toEqual({});
+  });
+});
+
+// ── resolveProjectConfigFile ─────────────────────────────────
+
+describe("resolveProjectConfigFile", () => {
+  it("returns js type when dev-proxy.config.js exists", () => {
+    fsMock.existsSync.mockImplementation((p: string) => p === "/app/dev-proxy.config.js");
+    const result = resolveProjectConfigFile("/app");
+    expect(result).toEqual({ type: "js", path: "/app/dev-proxy.config.js" });
+  });
+
+  it("returns js type when dev-proxy.config.mjs exists", () => {
+    fsMock.existsSync.mockImplementation(
+      (p: string) => p === "/app/dev-proxy.config.mjs",
+    );
+    const result = resolveProjectConfigFile("/app");
+    expect(result).toEqual({ type: "js", path: "/app/dev-proxy.config.mjs" });
+  });
+
+  it("returns json type when only .dev-proxy.json exists", () => {
+    fsMock.existsSync.mockImplementation((p: string) => p === "/app/.dev-proxy.json");
+    const result = resolveProjectConfigFile("/app");
+    expect(result).toEqual({ type: "json", path: "/app/.dev-proxy.json" });
+  });
+
+  it("returns null when no config file exists", () => {
+    fsMock.existsSync.mockReturnValue(false);
+    expect(resolveProjectConfigFile("/app")).toBeNull();
+  });
+
+  it("prefers JS config over JSON", () => {
+    fsMock.existsSync.mockReturnValue(true);
+    const result = resolveProjectConfigFile("/app");
+    expect(result?.type).toBe("js");
+  });
+});
+
+// ── loadJsConfig ─────────────────────────────────────────────
+
+describe("loadJsConfig", () => {
+  it("returns null and logs error for non-existent file", async () => {
+    const result = await loadJsConfig("/nonexistent/dev-proxy.config.js");
+    expect(result).toBeNull();
+  });
+
+  it("loads routes from a real JS config file", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.js");
+    realFs.writeFileSync(
+      configPath,
+      'export default { routes: { api: "http://localhost:4000" } };\n',
+    );
+
+    try {
+      const result = await loadJsConfig(configPath);
+      expect(result).toEqual({ routes: { api: "http://localhost:4000" } });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+});
+
+// ── loadProjectConfig with JS config ─────────────────────────
+
+describe("loadProjectConfig (JS config path)", () => {
+  it("loads routes from JS config and worktrees from JSON", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const jsPath = join(tmpDir, "dev-proxy.config.js");
+    const jsonPath = join(tmpDir, ".dev-proxy.json");
+    realFs.writeFileSync(
+      jsPath,
+      'export default { routes: { web: "http://localhost:3000" } };\n',
+    );
+    realFs.writeFileSync(
+      jsonPath,
+      JSON.stringify({ worktrees: { feat: { port: 5000 } } }),
+    );
+
+    // Mock existsSync to return true for both config files in tmpDir
+    fsMock.existsSync.mockImplementation((p: string) => p === jsPath || p === jsonPath);
+    fsMock.readFileSync.mockImplementation((p: string) => {
+      if (p === jsonPath) return JSON.stringify({ worktrees: { feat: { port: 5000 } } });
+      return "";
+    });
+
+    try {
+      const result = await loadProjectConfig(tmpDir);
+      expect(result).not.toBeNull();
+      expect(result?.configType).toBe("js");
+      expect(result?.routes).toEqual({ web: "http://localhost:3000" });
+      expect(result?.worktrees).toEqual({ feat: { port: 5000 } });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("returns null when JS config fails to load", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const jsPath = join(tmpDir, "dev-proxy.config.js");
+    realFs.writeFileSync(jsPath, "this is not valid javascript }{{{");
+
+    fsMock.existsSync.mockImplementation((p: string) => p === jsPath);
+
+    try {
+      const result = await loadProjectConfig(tmpDir);
+      expect(result).toBeNull();
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
   });
 });
 
