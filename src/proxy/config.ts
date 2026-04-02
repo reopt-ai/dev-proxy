@@ -117,7 +117,13 @@ function loadConfig(): ResolvedConfig {
   return { domain, port, httpsPort, certPath, keyPath, projects };
 }
 
-export const config = loadConfig();
+export let config = loadConfig();
+
+/** Re-read all config files and replace the live config singleton. */
+export function reloadConfig(): ResolvedConfig {
+  config = loadConfig();
+  return config;
+}
 
 export const __testing = {
   parsePort,
