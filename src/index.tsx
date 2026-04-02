@@ -112,7 +112,7 @@ function restoreTerminal() {
   _raw("\x1b[?1049l");
 }
 
-function shutdown(code = 0) {
+function shutdown(code = 0, reason?: string) {
   if (shuttingDown) return;
   shuttingDown = true;
 
@@ -136,17 +136,20 @@ function shutdown(code = 0) {
   // Drain any buffered frame before leaving alternate screen
   flushBufferedFrame();
   restoreTerminal();
+  if (reason) {
+    console.error(`[dev-proxy] Shutdown: ${reason} (exit ${code})`);
+  }
   process.exit(code);
 }
 
 process.on("SIGINT", () => {
-  shutdown(0);
+  shutdown(0, "SIGINT");
 });
 process.on("SIGTERM", () => {
-  shutdown(0);
+  shutdown(0, "SIGTERM");
 });
 process.on("SIGHUP", () => {
-  shutdown(0);
+  shutdown(0, "SIGHUP");
 });
 process.on("uncaughtException", (err, origin) => {
   flushBufferedFrame();
@@ -154,7 +157,7 @@ process.on("uncaughtException", (err, origin) => {
   console.error(
     `[dev-proxy] Uncaught exception (${origin}): ${err.stack ?? err.message}`,
   );
-  shutdown(1);
+  shutdown(1, "uncaughtException");
 });
 process.on("unhandledRejection", (reason) => {
   const message =
@@ -162,5 +165,5 @@ process.on("unhandledRejection", (reason) => {
   flushBufferedFrame();
   restoreTerminal();
   console.error(`[dev-proxy] Unhandled rejection: ${message}`);
-  shutdown(1);
+  shutdown(1, "unhandledRejection");
 });
