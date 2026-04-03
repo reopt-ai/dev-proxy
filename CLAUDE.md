@@ -52,9 +52,8 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 - **Type imports required** — `import type { Foo }` enforced by ESLint; plain import of type-only symbols will fail lint.
 - **ESM only** — `"type": "module"`, all imports need `.js` extensions, no `require()`.
 - **Never `git push` autonomously** — commit is fine, but push must be explicitly requested by the user.
-- **Never manually version, tag, or publish** — semantic-release handles `package.json` version, git tags, CHANGELOG.md, npm publish, and GitHub releases automatically on push to main. Do not edit these manually.
+- **Never manually version, tag, or publish** — semantic-release handles git tags, npm publish, and GitHub releases automatically on push to main. Do not edit these manually.
 - **Never force push to main** — breaks semantic-release tag history and can cause duplicate or skipped releases.
-- **Never edit CHANGELOG.md manually** — semantic-release generates it; manual edits cause merge conflicts on the next release.
 
 ## CLI Commands
 
