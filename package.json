@@ -27,6 +27,12 @@
     "subdomain"
   ],
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
   "bin": {
     "dev-proxy": "bin/dev-proxy.js"
   },

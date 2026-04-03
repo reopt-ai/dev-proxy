@@ -3,7 +3,12 @@ process.title = "dev-proxy";
 import { watch } from "node:fs";
 import { basename, dirname } from "node:path";
 import { render } from "ink";
-import { reloadConfig, config, GLOBAL_CONFIG_PATH } from "./proxy/config.js";
+import {
+  reloadConfig,
+  config,
+  GLOBAL_CONFIG_PATH,
+  PROJECT_CONFIG_NAME,
+} from "./proxy/config.js";
 import { rebuildRoutes } from "./proxy/routes.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
 import { createProxyServer, startProxyServer, destroyAgents } from "./proxy/server.js";
@@ -116,35 +121,18 @@ let configDebounce: ReturnType<typeof setTimeout> | null = null;
 function onConfigChange(): void {
   if (configDebounce) clearTimeout(configDebounce);
   configDebounce = setTimeout(() => {
-    try {
-      reloadConfig();
-      rebuildRoutes();
-    } catch {
-      /* config reload failure is non-fatal */
-    }
+    void reloadConfig()
+      .then(() => {
+        rebuildRoutes();
+      })
+      .catch(() => {
+        /* config reload failure is non-fatal */
+      });
   }, 150);
 }
 
-// Watch global config
-try {
-  const globalDir = dirname(GLOBAL_CONFIG_PATH);
-  const globalBase = basename(GLOBAL_CONFIG_PATH);
-  const w = watch(globalDir, (_event, filename) => {
-    if (filename === globalBase) onConfigChange();
-  });
-  w.on("error", () => {
-    /* intentional: watcher errors are non-fatal */
-  });
-  configWatchers.push(w);
-} catch {
-  /* config dir doesn't exist yet — no watcher needed */
-}
-
-// Watch each project config
-for (const project of config.projects) {
+function watchFile(dir: string, base: string): void {
   try {
-    const dir = dirname(project.configPath);
-    const base = basename(project.configPath);
     const w = watch(dir, (_event, filename) => {
       if (filename === base) onConfigChange();
     });
@@ -153,7 +141,20 @@ for (const project of config.projects) {
     });
     configWatchers.push(w);
   } catch {
-    /* project dir doesn't exist — skip */
+    /* directory doesn't exist — skip */
+  }
+}
+
+// Watch global config
+watchFile(dirname(GLOBAL_CONFIG_PATH), basename(GLOBAL_CONFIG_PATH));
+
+// Watch each project config (JS config file + .dev-proxy.json for worktrees)
+for (const project of config.projects) {
+  // Watch the primary config file (JS or JSON)
+  watchFile(dirname(project.configPath), basename(project.configPath));
+  // If using JS config, also watch .dev-proxy.json for worktree changes
+  if (project.configType === "js") {
+    watchFile(project.path, PROJECT_CONFIG_NAME);
   }
 }
 

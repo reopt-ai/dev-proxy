@@ -5,6 +5,7 @@ export const KNOWN_COMMANDS = [
   "config",
   "project",
   "worktree",
+  "migrate",
 ];
 
 const args = process.argv.slice(2);
@@ -37,6 +38,9 @@ if (args.includes("--help") || args.includes("-h")) {
       break;
     case "worktree":
       await import("./commands/worktree.js");
+      break;
+    case "migrate":
+      await import("./commands/migrate.js");
       break;
     default: {
       // Unknown command — suggest closest match

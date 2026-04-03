@@ -10,11 +10,14 @@ import {
   CONFIG_DIR,
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_NAME,
+  JS_CONFIG_NAMES,
   isValidPort,
   isValidSubdomain,
   readGlobalConfig,
   writeGlobalConfig,
   writeProjectConfig,
+  writeJsConfig,
+  resolveProjectConfigFile,
 } from "../cli/config-io.js";
 import { ExitOnRender } from "../cli/output.js";
 
@@ -335,19 +338,30 @@ function InitWizard() {
       addMessage(`Failed to write ${GLOBAL_CONFIG_PATH}: ${(err as Error).message}`);
     }
 
-    // Project config
-    const projectConfigPath = resolve(absPath, PROJECT_CONFIG_NAME);
+    // Project config — JS config for routes, JSON for worktrees
+    const jsConfigPath = resolve(absPath, JS_CONFIG_NAMES[0] as string);
+    const jsonConfigPath = resolve(absPath, PROJECT_CONFIG_NAME);
     const routeMap = buildRouteMap(routes, wildcard);
 
-    if (!existsSync(projectConfigPath) || overwriteProject) {
+    if (!existsSync(jsConfigPath) || overwriteProject) {
       try {
-        writeProjectConfig(absPath, { routes: routeMap, worktrees: {} });
-        addMessage(`Created ${projectConfigPath}`);
+        writeJsConfig(absPath, routeMap);
+        addMessage(`Created ${jsConfigPath}`);
       } catch (err) {
-        addMessage(`Failed to write ${projectConfigPath}: ${(err as Error).message}`);
+        addMessage(`Failed to write ${jsConfigPath}: ${(err as Error).message}`);
       }
     } else {
-      addMessage(`Skipped ${projectConfigPath}`);
+      addMessage(`Skipped ${jsConfigPath}`);
+    }
+
+    // Ensure .dev-proxy.json exists for worktrees
+    if (!existsSync(jsonConfigPath)) {
+      try {
+        writeProjectConfig(absPath, { worktrees: {} });
+        addMessage(`Created ${jsonConfigPath}`);
+      } catch (err) {
+        addMessage(`Failed to write ${jsonConfigPath}: ${(err as Error).message}`);
+      }
     }
 
     setStep("done");
@@ -370,7 +384,7 @@ function InitWizard() {
       : resolve(process.cwd(), projectPath)
     : "";
   const projectConfigExists =
-    absProjectPath && existsSync(resolve(absProjectPath, PROJECT_CONFIG_NAME));
+    absProjectPath && resolveProjectConfigFile(absProjectPath) !== null;
 
   // Check if project is already registered in global config
   const isAlreadyRegistered =
@@ -499,7 +513,7 @@ function InitWizard() {
 
       {step === "confirm" && (
         <ConfirmOverwrite
-          path={resolve(absProjectPath, PROJECT_CONFIG_NAME)}
+          path={resolve(absProjectPath, JS_CONFIG_NAMES[0] as string)}
           onConfirm={(yes) => {
             writeConfigs(yes);
           }}

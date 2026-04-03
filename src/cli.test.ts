@@ -117,10 +117,11 @@ describe("KNOWN_COMMANDS", () => {
     expect(KNOWN_COMMANDS).toContain("config");
     expect(KNOWN_COMMANDS).toContain("project");
     expect(KNOWN_COMMANDS).toContain("worktree");
+    expect(KNOWN_COMMANDS).toContain("migrate");
   });
 
-  it("has exactly 6 commands", () => {
-    expect(KNOWN_COMMANDS).toHaveLength(6);
+  it("has exactly 7 commands", () => {
+    expect(KNOWN_COMMANDS).toHaveLength(7);
   });
 });
 

@@ -12,9 +12,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
-import { CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME } from "../proxy/config.js";
+import {
+  CONFIG_DIR,
+  GLOBAL_CONFIG_PATH,
+  PROJECT_CONFIG_NAME,
+  JS_CONFIG_NAMES,
+  resolveProjectConfigFile,
+} from "../proxy/config.js";
 
-export { CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME };
+export {
+  CONFIG_DIR,
+  GLOBAL_CONFIG_PATH,
+  PROJECT_CONFIG_NAME,
+  JS_CONFIG_NAMES,
+  resolveProjectConfigFile,
+};
 
 /** Write to a temp file then atomically rename — prevents corruption on crash. */
 function atomicWriteFileSync(filePath: string, data: string): void {
@@ -131,6 +143,27 @@ export function readProjectConfig(projectPath: string): RawProjectConfig {
 export function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): void {
   const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
   atomicWriteFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n");
+}
+
+// ── JS config generation ────────────────────────────────────
+
+export function generateJsConfig(routes: Record<string, string>): string {
+  const entries = Object.entries(routes)
+    .map(([sub, target]) => `    ${JSON.stringify(sub)}: ${JSON.stringify(target)},`)
+    .join("\n");
+
+  return `/** @type {import('@reopt-ai/dev-proxy').Config} */
+export default {
+  routes: {
+${entries}
+  },
+};
+`;
+}
+
+export function writeJsConfig(projectPath: string, routes: Record<string, string>): void {
+  const configPath = resolve(projectPath, JS_CONFIG_NAMES[0] as string);
+  atomicWriteFileSync(configPath, generateJsConfig(routes));
 }
 
 // ── Validation ───────────────────────────────────────────────

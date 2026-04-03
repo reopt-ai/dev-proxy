@@ -17,6 +17,7 @@ export default defineConfig({
         "src/hooks/**",
         "src/components/**",
         "src/proxy/types.ts",
+        "src/types.ts",
       ],
       thresholds: {
         lines: 90,

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { useSyncExternalStore } from "react";
-import { config, type ProjectConfig } from "./config.js";
+import { config, PROJECT_CONFIG_NAME, type ProjectConfig } from "./config.js";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -55,9 +55,11 @@ function readRegistry(): void {
 }
 
 function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEntry> {
+  // Worktrees always live in .dev-proxy.json, even when routes are in a JS config
+  const jsonPath = resolve(project.path, PROJECT_CONFIG_NAME);
   try {
-    if (!existsSync(project.configPath)) return project.worktrees;
-    const raw = readFileSync(project.configPath, "utf-8");
+    if (!existsSync(jsonPath)) return project.worktrees;
+    const raw = readFileSync(jsonPath, "utf-8");
     const data = JSON.parse(raw) as { worktrees?: Record<string, WorktreeEntry> };
     return data.worktrees ?? {};
   } catch {
@@ -69,11 +71,13 @@ function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEn
 export function loadRegistry(): void {
   readRegistry();
 
+  // Watch .dev-proxy.json for worktree changes (always JSON, regardless of config type)
   for (const project of config.projects) {
-    if (!existsSync(project.configPath)) continue;
+    const jsonPath = resolve(project.path, PROJECT_CONFIG_NAME);
+    if (!existsSync(jsonPath)) continue;
     try {
-      const dir = dirname(project.configPath);
-      const base = basename(project.configPath);
+      const dir = dirname(jsonPath);
+      const base = basename(jsonPath);
       const watcher = watch(dir, (_event, filename) => {
         if (filename !== base) return;
         if (debounceTimer) clearTimeout(debounceTimer);

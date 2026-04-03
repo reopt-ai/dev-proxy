@@ -79,12 +79,14 @@ describe("collectSubdomains", () => {
       {
         path: "/p1",
         configPath: "/p1/.dev-proxy.json",
+        configType: "json",
         routes: { app: "http://localhost:3000", api: "http://localhost:4000" },
         worktrees: {},
       },
       {
         path: "/p2",
         configPath: "/p2/.dev-proxy.json",
+        configType: "json",
         routes: { web: "http://localhost:5000" },
         worktrees: {},
       },
@@ -100,6 +102,7 @@ describe("collectSubdomains", () => {
       {
         path: "/p1",
         configPath: "/p1/.dev-proxy.json",
+        configType: "json",
         routes: { app: "http://localhost:3000", "*": "http://localhost:9999" },
         worktrees: {},
       },
@@ -115,12 +118,14 @@ describe("collectSubdomains", () => {
       {
         path: "/p1",
         configPath: "/p1/.dev-proxy.json",
+        configType: "json",
         routes: { app: "http://localhost:3000" },
         worktrees: {},
       },
       {
         path: "/p2",
         configPath: "/p2/.dev-proxy.json",
+        configType: "json",
         routes: { app: "http://localhost:4000" },
         worktrees: {},
       },
@@ -137,6 +142,7 @@ describe("collectSubdomains", () => {
       {
         path: "/p1",
         configPath: "/p1/.dev-proxy.json",
+        configType: "json",
         routes: {},
         worktrees: {},
       },
@@ -192,7 +198,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -211,7 +223,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -229,7 +247,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -248,7 +272,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -266,7 +296,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -289,7 +325,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -314,7 +356,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -331,7 +379,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -348,7 +402,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -368,7 +428,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);
@@ -393,7 +459,13 @@ describe("checkWorktreeConfig", () => {
     });
 
     const projects: ProjectConfig[] = [
-      { path: "/p1", configPath: "/p1/.dev-proxy.json", routes: {}, worktrees: {} },
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {},
+        worktrees: {},
+      },
     ];
 
     const results = checkWorktreeConfig(projects);

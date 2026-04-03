@@ -1,12 +1,12 @@
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Box, Text, render } from "ink";
 import {
-  PROJECT_CONFIG_NAME,
   readGlobalConfig,
   writeGlobalConfig,
+  writeJsConfig,
   writeProjectConfig,
   readProjectConfig,
+  resolveProjectConfigFile,
 } from "../cli/config-io.js";
 import {
   Header,
@@ -69,10 +69,10 @@ function ProjectAdd({ projectPath }: { projectPath: string }) {
     );
   }
 
-  // Create .dev-proxy.json template if it doesn't exist
-  const projectConfigPath = resolve(absPath, PROJECT_CONFIG_NAME);
-  if (!existsSync(projectConfigPath)) {
-    writeProjectConfig(absPath, { routes: {}, worktrees: {} });
+  // Create config files if no config exists
+  if (!resolveProjectConfigFile(absPath)) {
+    writeJsConfig(absPath, {});
+    writeProjectConfig(absPath, { worktrees: {} });
   }
 
   cfg.projects = [...projects, absPath];

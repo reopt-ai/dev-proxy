@@ -19,6 +19,7 @@ const configMock = {
   config: {
     projects: [] as ProjectConfig[],
   },
+  PROJECT_CONFIG_NAME: ".dev-proxy.json",
 };
 
 vi.mock("./config.js", () => configMock);
@@ -57,6 +58,7 @@ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
     path: "/projects/app",
     configPath: "/projects/app/.dev-proxy.json",
+    configType: "json",
     routes: {},
     worktrees: {},
     ...overrides,
@@ -186,9 +188,11 @@ describe("readRegistry", () => {
 
   it("first project wins for duplicate branch names", () => {
     const projectA = makeProject({
+      path: "/projects/a",
       configPath: "/projects/a/.dev-proxy.json",
     });
     const projectB = makeProject({
+      path: "/projects/b",
       configPath: "/projects/b/.dev-proxy.json",
     });
     configMock.config.projects = [projectA, projectB];
