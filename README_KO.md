@@ -62,7 +62,17 @@ dev-proxy
 
 **Enter**를 눌러 인스펙터를 활성화한 뒤, 브라우저에서 `http://www.example.dev:3000`을 열어보세요.
 
-### LLM 에이전트용
+### AI 에이전트용
+
+**방법 1 — Claude Code 스킬** (권장):
+
+```bash
+npx skills add reopt-ai/dev-proxy
+```
+
+Claude Code에서 **"setup dev-proxy"** 라고 입력하면 프로젝트 구조를 자동 분석하고, 라우트를 제안하고, 설정 파일을 생성합니다.
+
+**방법 2 — 모든 AI 에이전트**:
 
 AI 코딩 에이전트(Claude Code, Cursor, Copilot 등)에 이 프롬프트를 붙여넣으세요:
 

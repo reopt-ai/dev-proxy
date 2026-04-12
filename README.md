@@ -62,7 +62,17 @@ dev-proxy
 
 Press **Enter** to arm the inspector, then open `http://www.example.dev:3000` in your browser.
 
-### For LLM Agents
+### For AI Agents
+
+**Option 1 — Claude Code skill** (recommended):
+
+```bash
+npx skills add reopt-ai/dev-proxy
+```
+
+Then tell Claude Code: **"setup dev-proxy"** — it will detect your project structure, suggest routes, and generate config files automatically.
+
+**Option 2 — Any AI agent**:
 
 Paste this to your AI coding agent (Claude Code, Cursor, Copilot, etc.):
 
