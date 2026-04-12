@@ -268,3 +268,4 @@ Common issues:
 - **Port in use** — Check with `lsof -ti :3000`. Kill the process or change the port via `dev-proxy config set port 3080`.
 - **HTTPS not working** — Ensure mkcert is installed (`which mkcert`) and the local CA is set up (`mkcert -install`).
 - **Config not loading** — Run `dev-proxy status` to see what config is actually loaded. Check file paths and JSON syntax.
+- **Next.js HMR not working / origin errors** — Next.js >= 15.0 validates request origins. Add `allowedDevOrigins` to `next.config.mjs` with each proxy subdomain URL (e.g., `["http://web.localhost:3000"]`). See the [Next.js docs on allowedDevOrigins](https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins).

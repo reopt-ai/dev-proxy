@@ -286,6 +286,36 @@ If the user does not need worktree support, this file can be skipped.
 The CLI commands (`dev-proxy project add`, `dev-proxy worktree create`)
 will create it automatically when needed.
 
+### 3.4 Framework-specific setup
+
+After generating the dev-proxy config, check if any detected frameworks
+require additional configuration to work behind a reverse proxy.
+
+**Next.js (>= 15.0)**: The dev server validates request origins and blocks
+requests from unrecognized hosts. Add `allowedDevOrigins` to `next.config.*`:
+
+```js
+// next.config.mjs
+const nextConfig = {
+  allowedDevOrigins: [
+    "http://<subdomain>.<domain>:<port>", // e.g. "http://web.localhost:3000"
+  ],
+};
+export default nextConfig;
+```
+
+Build the origins list from the confirmed route map:
+
+- For each subdomain that routes to a Next.js service, add
+  `http://<subdomain>.<domain>:<proxy-port>` (the proxy port, not the
+  upstream port)
+- If HTTPS is enabled, also add `https://<subdomain>.<domain>:<httpsPort>`
+- If worktree support is enabled, add `http://<branch>--<subdomain>.<domain>:<port>`
+  patterns as well (or use a broad pattern if the user prefers)
+
+Always explain to the user why this is needed before modifying their
+`next.config.*` file.
+
 ---
 
 ## Phase 4: DNS Setup

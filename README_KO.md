@@ -306,6 +306,21 @@ brew install mkcert    # macOS
 mkcert -install
 ```
 
+### Next.js HMR / origin 오류
+
+Next.js >= 15.0은 개발 서버 요청의 `Origin` 헤더를 검증합니다. dev-proxy를 통해 접근하면 (예: `http://web.localhost:3000`) origin이 달라져서 요청 차단이나 HMR 실패가 발생할 수 있습니다.
+
+`next.config.mjs`에 `allowedDevOrigins`를 추가하세요:
+
+```js
+const nextConfig = {
+  allowedDevOrigins: ["http://web.localhost:3000"],
+};
+export default nextConfig;
+```
+
+Next.js 서비스로 라우팅되는 서브도메인마다 하나씩 추가합니다. HTTPS를 사용하면 `https://` 변형도 추가하세요.
+
 ### 빈 화면 / Raw mode 에러
 
 `Raw mode is not supported` 메시지가 보이면 비-TTY 환경(파이프, CI 등)에서 실행 중인 것입니다. dev-proxy는 대화형 터미널이 필요합니다.
