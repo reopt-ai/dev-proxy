@@ -62,7 +62,17 @@ dev-proxy
 
 Press **Enter** to arm the inspector, then open `http://www.example.dev:3000` in your browser.
 
-### For LLM Agents
+### For AI Agents
+
+**Option 1 — Claude Code skill** (recommended):
+
+```bash
+npx skills add reopt-ai/dev-proxy
+```
+
+Then tell Claude Code: **"setup dev-proxy"** — it will detect your project structure, suggest routes, and generate config files automatically.
+
+**Option 2 — Any AI agent**:
 
 Paste this to your AI coding agent (Claude Code, Cursor, Copilot, etc.):
 
@@ -295,6 +305,21 @@ HTTPS is optional. Install mkcert for TLS support:
 brew install mkcert    # macOS
 mkcert -install
 ```
+
+### Next.js HMR / origin errors
+
+Next.js >= 15.0 validates the `Origin` header on dev server requests. When accessing via dev-proxy (e.g., `http://web.localhost:3000`), the origin differs from what Next.js expects, causing blocked requests or HMR failures.
+
+Add `allowedDevOrigins` to your `next.config.mjs`:
+
+```js
+const nextConfig = {
+  allowedDevOrigins: ["http://web.localhost:3000"],
+};
+export default nextConfig;
+```
+
+Add one entry per subdomain that routes to a Next.js service. If using HTTPS, also add the `https://` variant.
 
 ### Blank screen / Raw mode error
 
