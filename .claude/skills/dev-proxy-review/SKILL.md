@@ -8,6 +8,7 @@ description: |
   "review", "publish review".
 metadata:
   version: 2.0.0
+  internal: true
 ---
 
 # dev-proxy-review Skill
