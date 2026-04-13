@@ -64,7 +64,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "dependencies": {
-    "ink": "^6.8.0",
+    "ink": "^7.0.0",
     "ink-select-input": "^6.2.0",
     "ink-text-input": "^6.0.0",
     "react": "^19.0.0"
