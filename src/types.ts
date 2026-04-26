@@ -1,5 +1,5 @@
 /**
- * Public type definitions for dev-proxy.config.js
+ * Public type definitions for dev-proxy.config.mjs
  *
  * Usage in config file:
  * ```js
@@ -31,7 +31,7 @@ export interface WorktreeConfig {
   hooks?: WorktreeHooks;
 }
 
-/** Shape of the default export from dev-proxy.config.js */
+/** Shape of the default export from dev-proxy.config.mjs */
 export interface Config {
   /**
    * Route map: subdomain → target URL.

@@ -17,7 +17,7 @@ vi.mock("../proxy/config.js", () => ({
   CONFIG_DIR: "/mock/.dev-proxy",
   GLOBAL_CONFIG_PATH: "/mock/.dev-proxy/config.json",
   PROJECT_CONFIG_NAME: ".dev-proxy.json",
-  JS_CONFIG_NAMES: ["dev-proxy.config.js", "dev-proxy.config.mjs"],
+  JS_CONFIG_NAMES: ["dev-proxy.config.mjs", "dev-proxy.config.js"],
   resolveProjectConfigFile: mockResolveProjectConfigFile,
 }));
 
@@ -348,15 +348,15 @@ describe("writeJsConfig", () => {
     mockRenameSync.mockReset();
   });
 
-  it("calls atomic write with correct filename (dev-proxy.config.js)", () => {
+  it("calls atomic write with correct filename (dev-proxy.config.mjs)", () => {
     writeJsConfig("/projects/app", { api: "http://localhost:4000" });
     // Should write to temp file first
     const tmpPath = mockWriteFileSync.mock.calls[0]?.[0] as string;
-    expect(tmpPath).toBe("/projects/app/dev-proxy.config.js.tmp");
+    expect(tmpPath).toBe("/projects/app/dev-proxy.config.mjs.tmp");
     // Then rename to final path
     expect(mockRenameSync).toHaveBeenCalledWith(
-      "/projects/app/dev-proxy.config.js.tmp",
-      "/projects/app/dev-proxy.config.js",
+      "/projects/app/dev-proxy.config.mjs.tmp",
+      "/projects/app/dev-proxy.config.mjs",
     );
   });
 });

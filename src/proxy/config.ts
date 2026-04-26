@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 export const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
 export const GLOBAL_CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
 export const PROJECT_CONFIG_NAME = ".dev-proxy.json";
-export const JS_CONFIG_NAMES = ["dev-proxy.config.js", "dev-proxy.config.mjs"];
+export const JS_CONFIG_NAMES = ["dev-proxy.config.mjs", "dev-proxy.config.js"];
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ interface RawProjectConfig {
   worktrees?: Record<string, WorktreeEntry>;
 }
 
-/** Raw shape of dev-proxy.config.js default export */
+/** Raw shape of dev-proxy.config.mjs default export */
 interface RawJsConfig {
   routes?: Record<string, string>;
   worktreeConfig?: unknown;

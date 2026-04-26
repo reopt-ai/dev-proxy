@@ -232,18 +232,18 @@ describe("loadProjectConfig", () => {
 // ── resolveProjectConfigFile ─────────────────────────────────
 
 describe("resolveProjectConfigFile", () => {
-  it("returns js type when dev-proxy.config.js exists", () => {
-    fsMock.existsSync.mockImplementation((p: string) => p === "/app/dev-proxy.config.js");
-    const result = resolveProjectConfigFile("/app");
-    expect(result).toEqual({ type: "js", path: "/app/dev-proxy.config.js" });
-  });
-
   it("returns js type when dev-proxy.config.mjs exists", () => {
     fsMock.existsSync.mockImplementation(
       (p: string) => p === "/app/dev-proxy.config.mjs",
     );
     const result = resolveProjectConfigFile("/app");
     expect(result).toEqual({ type: "js", path: "/app/dev-proxy.config.mjs" });
+  });
+
+  it("returns js type when dev-proxy.config.js exists", () => {
+    fsMock.existsSync.mockImplementation((p: string) => p === "/app/dev-proxy.config.js");
+    const result = resolveProjectConfigFile("/app");
+    expect(result).toEqual({ type: "js", path: "/app/dev-proxy.config.js" });
   });
 
   it("returns json type when only .dev-proxy.json exists", () => {
