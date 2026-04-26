@@ -38,7 +38,7 @@ function migrateProject(projectPath: string): MigrateResult {
     return { path: projectPath, status: "skipped-no-routes" };
   }
 
-  // Write dev-proxy.config.js with routes (and worktreeConfig comment hint)
+  // Write dev-proxy.config.mjs with routes (and worktreeConfig comment hint)
   writeJsConfig(projectPath, routes);
 
   // Rewrite .dev-proxy.json with only worktrees
@@ -92,7 +92,9 @@ function Migrate() {
       {migrated.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>
-            {"    Routes moved to dev-proxy.config.js, worktrees kept in .dev-proxy.json"}
+            {
+              "    Routes moved to dev-proxy.config.mjs, worktrees kept in .dev-proxy.json"
+            }
           </Text>
         </Box>
       )}
