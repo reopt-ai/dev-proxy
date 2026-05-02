@@ -98,8 +98,8 @@ cd dev-proxy && pnpm install && pnpm proxy
 설정은 세 개의 파일로 나뉩니다:
 
 1. **`~/.dev-proxy/config.json`** — 전역 설정 (도메인, 포트, TLS, 프로젝트 목록)
-2. **`<프로젝트>/dev-proxy.config.mjs`** — 프로젝트별 라우트 (현재 표준 형식)
-3. **`<프로젝트>/.dev-proxy.json`** — 워크트리 상태 및 `worktreeConfig` (워크트리를 사용할 때만 필요)
+2. **`<프로젝트>/dev-proxy.config.mjs`** — 프로젝트별 라우트 (표준 형식)
+3. **`<프로젝트>/.dev-proxy.json`** — `worktreeConfig` 와 `worktrees` 인스턴스 맵 (`dev-proxy init`이 빈 placeholder를 자동 생성하며, 워크트리 CLI 명령은 이 파일을 필요로 함)
 
 > 가장 간단한 방법은 프로젝트 디렉터리에서 `dev-proxy init`을 실행하는 것입니다. 마법사가 위 파일들을 자동으로 생성합니다. 아래 섹션은 직접 작성하고 싶을 때 참고하세요.
 

@@ -98,8 +98,8 @@ cd dev-proxy && pnpm install && pnpm proxy
 Config is split into three files:
 
 1. **`~/.dev-proxy/config.json`** — Global settings (domain, ports, TLS, project list)
-2. **`<project>/dev-proxy.config.mjs`** — Per-project routes (canonical format since v0.x)
-3. **`<project>/.dev-proxy.json`** — Per-project worktree state and `worktreeConfig` (only needed if you use worktrees)
+2. **`<project>/dev-proxy.config.mjs`** — Per-project routes (canonical format)
+3. **`<project>/.dev-proxy.json`** — Per-project `worktreeConfig` and the `worktrees` instance map (`dev-proxy init` writes an empty placeholder; the worktree CLI commands require this file)
 
 > Easiest path: run `dev-proxy init` from your project directory and the wizard creates these files for you. The sections below cover the file format if you'd rather author them by hand.
 
