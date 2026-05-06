@@ -24,6 +24,10 @@ function Help() {
         <Text dimColor>Interactive setup wizard</Text>
       </Text>
       <Text>
+        {"  migrate             "}
+        <Text dimColor>Move routes from .dev-proxy.json to dev-proxy.config.mjs</Text>
+      </Text>
+      <Text>
         {"  status              "}
         <Text dimColor>Show current configuration and routing table</Text>
       </Text>

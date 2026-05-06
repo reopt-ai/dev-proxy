@@ -43,7 +43,7 @@ dev-proxy is:
 - Upstream `http`/`https` and `ws`/`wss` target support
 - Git worktree-based dynamic routing via project config
 - Auto-generated TLS certificates via [mkcert](https://github.com/FiloSottile/mkcert)
-- Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`.dev-proxy.json`)
+- Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`dev-proxy.config.mjs` for routes, `.dev-proxy.json` for worktrees)
 
 ## Prerequisites
 
@@ -95,10 +95,13 @@ cd dev-proxy && pnpm install && pnpm proxy
 
 ## Configuration
 
-Config is split into two layers:
+Config is split into three files:
 
 1. **`~/.dev-proxy/config.json`** — Global settings (domain, ports, TLS, project list)
-2. **`.dev-proxy.json`** — Per-project config (routes, worktrees)
+2. **`<project>/dev-proxy.config.mjs`** — Per-project routes (canonical format)
+3. **`<project>/.dev-proxy.json`** — Per-project `worktreeConfig` and the `worktrees` instance map (`dev-proxy init` writes an empty placeholder; the worktree CLI commands require this file)
+
+> Easiest path: run `dev-proxy init` from your project directory and the wizard creates these files for you. The sections below cover the file format if you'd rather author them by hand.
 
 ### Global Config (`~/.dev-proxy/config.json`)
 
@@ -111,27 +114,37 @@ Config is split into two layers:
 }
 ```
 
-### Project Config (`.dev-proxy.json`)
+### Project Routes (`dev-proxy.config.mjs`)
 
-Place a `.dev-proxy.json` in each project root registered in `projects`. Routes and worktrees are defined here.
+Place a `dev-proxy.config.mjs` in each project root registered in `projects`. Routes are defined here.
 
-```json
-{
-  "routes": {
-    "www": "http://localhost:3001",
-    "studio": "http://localhost:3001",
-    "api": "http://localhost:4000",
-    "*": "http://localhost:3001"
+```js
+/** @type {import('@reopt-ai/dev-proxy').Config} */
+export default {
+  routes: {
+    www: "http://localhost:3001",
+    studio: "http://localhost:3001",
+    api: "http://localhost:4000",
+    "*": "http://localhost:3001",
   },
-  "worktrees": {
-    "feature-auth": { "port": 4001 }
-  }
-}
+};
 ```
 
 - `"*"` is a wildcard — unmatched subdomains route here
 - When multiple projects register the same subdomain, the first one wins
 - `certPath`/`keyPath` are set in the global config, resolved relative to `~/.dev-proxy/`
+- `dev-proxy.config.js` is also accepted (used when `package.json` has `"type": "module"`); `.mjs` takes precedence if both exist
+- Resolution order at runtime: `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (legacy)
+
+### Migrating from `.dev-proxy.json`
+
+Earlier versions stored routes in `.dev-proxy.json`. That format still works, but `dev-proxy.config.mjs` is the documented default. To migrate every registered project at once:
+
+```bash
+dev-proxy migrate
+```
+
+The command moves `routes` from `.dev-proxy.json` into `dev-proxy.config.mjs` and rewrites `.dev-proxy.json` to keep only `worktrees`. Projects already on a JS config are skipped, and the command is idempotent. **Re-add your `worktreeConfig` block manually after migration** — `dev-proxy migrate` only moves `routes` and `worktreeConfig` continues to live in `.dev-proxy.json`.
 
 ### HTTPS
 
@@ -150,15 +163,23 @@ dev-proxy supports git worktree-based dynamic routing. When you use `branch--app
 
 **Automatic lifecycle management:**
 
-Add `worktreeConfig` to your project's `.dev-proxy.json`. Use `services` to define per-subdomain port mappings — dev-proxy allocates ports automatically and generates a `.env.local` file so your dev servers know which port to listen on:
+Routes go in `dev-proxy.config.mjs`; `worktreeConfig` and the `worktrees` instance map go in `.dev-proxy.json`. Use `services` to define per-subdomain port mappings — dev-proxy allocates ports automatically and generates a `.env.local` file so your dev servers know which port to listen on:
+
+```js
+// dev-proxy.config.mjs
+/** @type {import('@reopt-ai/dev-proxy').Config} */
+export default {
+  routes: {
+    www: "http://localhost:3001",
+    data: "http://localhost:4001",
+    "*": "http://localhost:3001",
+  },
+};
+```
 
 ```json
+// .dev-proxy.json
 {
-  "routes": {
-    "www": "http://localhost:3001",
-    "data": "http://localhost:4001",
-    "*": "http://localhost:3001"
-  },
   "worktrees": {
     "main": { "ports": { "www": 3001, "data": 4001 } }
   },
@@ -337,6 +358,7 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 | -------------------------------------- | ------------------------------------------------ |
 | `dev-proxy`                            | Start proxy and open traffic inspector           |
 | `dev-proxy init`                       | Interactive setup wizard                         |
+| `dev-proxy migrate`                    | Move routes from `.dev-proxy.json` → `.mjs`      |
 | `dev-proxy status`                     | Show configuration and routing table             |
 | `dev-proxy doctor`                     | Run environment diagnostics                      |
 | `dev-proxy config`                     | View global settings                             |
@@ -373,7 +395,7 @@ src/
 │   ├── config-io.ts       # Config I/O helpers and port allocation
 │   └── output.tsx         # Display components (Header, Section, Check, etc.)
 ├── proxy/
-│   ├── config.ts          # Config loader (~/.dev-proxy + .dev-proxy.json)
+│   ├── config.ts          # Config loader (~/.dev-proxy + dev-proxy.config.mjs / .dev-proxy.json)
 │   ├── server.ts          # HTTP/WS reverse proxy
 │   ├── routes.ts          # Subdomain → target routing
 │   ├── certs.ts           # TLS certificate resolution (mkcert)
