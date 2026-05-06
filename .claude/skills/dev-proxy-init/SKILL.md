@@ -68,7 +68,7 @@ this is a legacy JSON-only config. Inform the user and suggest:
 dev-proxy migrate
 ```
 
-This converts the JSON routes to `dev-proxy.config.js`. If the user chooses
+This converts the JSON routes to `dev-proxy.config.mjs`. If the user chooses
 to migrate, run the command and skip to Phase 3.3.
 
 ---
@@ -158,7 +158,7 @@ Is this correct? Would you like to add, remove, or change any routes?
 
 ## Phase 3: Generate Configuration
 
-The primary config file is `dev-proxy.config.js`. This is the only file users
+The primary config file is `dev-proxy.config.mjs`. This is the only file users
 edit directly. `.dev-proxy.json` is a runtime file managed by dev-proxy CLI
 commands — it is only needed for worktree port allocation state.
 
@@ -184,12 +184,12 @@ Write `~/.dev-proxy/config.json`:
 }
 ```
 
-### 3.2 Project config (`dev-proxy.config.js`)
+### 3.2 Project config (`dev-proxy.config.mjs`)
 
-This is the main configuration file. If `dev-proxy.config.js` or
+This is the main configuration file. If `dev-proxy.config.mjs` or
 `dev-proxy.config.mjs` already exists, ask the user before overwriting.
 
-Create `dev-proxy.config.js` in the project root with the confirmed routes.
+Create `dev-proxy.config.mjs` in the project root with the confirmed routes.
 The format must match exactly:
 
 ```js
@@ -265,7 +265,7 @@ Ask the user for:
 This file is **only needed when using worktree commands** (`dev-proxy worktree
 create/destroy`). It stores allocated port state per branch and is managed
 automatically by dev-proxy CLI. Do NOT put routes here — routes belong in
-`dev-proxy.config.js`.
+`dev-proxy.config.mjs`.
 
 If the user enabled worktree support in 3.2, create `.dev-proxy.json`:
 
@@ -432,7 +432,7 @@ Output the final setup summary:
 ```
 dev-proxy setup complete!
 
-  Config:  <project-path>/dev-proxy.config.js
+  Config:  <project-path>/dev-proxy.config.mjs
   Global:  ~/.dev-proxy/config.json
   Domain:  <domain>
 
@@ -452,14 +452,14 @@ dev-proxy setup complete!
 ## Rules
 
 - Never overwrite an existing global config — merge by adding the project path to `projects[]`
-- Never overwrite an existing `dev-proxy.config.js` without explicit user confirmation
+- Never overwrite an existing `dev-proxy.config.mjs` without explicit user confirmation
 - Never run `sudo` commands without explicit user confirmation
 - Always use `http://localhost:<port>` format for route targets (not bare ports)
 - The `"*"` wildcard route is optional — only add if the user wants a fallback
-- `dev-proxy.config.js` is the primary config file — all routes and worktreeConfig go here
+- `dev-proxy.config.mjs` is the primary config file — all routes and worktreeConfig go here
 - `.dev-proxy.json` is for worktree runtime state only — do not put routes in it
 - `.dev-proxy.json` should be added to `.gitignore` when created (it's machine-specific runtime state)
-- `dev-proxy.config.js` should be committed to git (it's project configuration)
+- `dev-proxy.config.mjs` should be committed to git (it's project configuration)
 - If the project already has a `.dev-proxy.json` with routes (legacy format), suggest running `dev-proxy migrate` to convert to JS config
 - Never modify the user's application code, `.env` files, or `package.json`
 - Always confirm the proposed route map before writing any files
