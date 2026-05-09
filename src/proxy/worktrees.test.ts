@@ -407,24 +407,40 @@ describe("loadRegistry / stopRegistry", () => {
     expect(__testing.debounceTimer).toBeNull();
   });
 
-  it("skips watcher setup when configPath does not exist", () => {
+  it("watch callback fires on both legacy and new worktree filenames", () => {
     const project = makeProject();
     configMock.config.projects = [project];
-    // existsSync returns true for readRegistry's readProjectWorktrees call,
-    // but we need it to return false during watcher setup.
-    // readRegistry calls readProjectWorktrees which calls existsSync(project.configPath)
-    // loadRegistry calls existsSync(project.configPath) for watcher setup
-    let callCount = 0;
-    fsMock.existsSync.mockImplementation(() => {
-      callCount++;
-      // First call is from readProjectWorktrees, second is from loadRegistry watcher setup
-      return callCount <= 1;
-    });
+    fsMock.existsSync.mockReturnValue(true);
     fsMock.readFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+
+    let watchCallback: (event: string, filename: string) => void = () => {
+      /* placeholder */
+    };
+    fsMock.watch.mockImplementation(
+      (_dir: string, cb: (event: string, filename: string) => void) => {
+        watchCallback = cb;
+        return { on: vi.fn(), close: vi.fn() };
+      },
+    );
 
     loadRegistry();
 
-    expect(fsMock.watch).not.toHaveBeenCalled();
+    // New file change triggers debounce
+    watchCallback("rename", ".dev-proxy.worktrees.json");
+    expect(__testing.debounceTimer).not.toBeNull();
+    stopRegistry();
+    expect(__testing.debounceTimer).toBeNull();
+
+    // Legacy file change also triggers debounce
+    loadRegistry();
+    watchCallback("change", ".dev-proxy.json");
+    expect(__testing.debounceTimer).not.toBeNull();
+    stopRegistry();
+
+    // Unrelated filename is ignored
+    loadRegistry();
+    watchCallback("change", "package.json");
+    expect(__testing.debounceTimer).toBeNull();
   });
 
   it("catches when watch() throws (directory doesn't exist)", () => {

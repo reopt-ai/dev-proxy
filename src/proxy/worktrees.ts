@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { useSyncExternalStore } from "react";
 import {
   config,
@@ -86,22 +86,17 @@ function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEn
 export function loadRegistry(): void {
   readRegistry();
 
-  // Watch the worktrees state file. Prefer the new file; fall back to the
-  // legacy .dev-proxy.json for projects that haven't migrated yet.
+  // Watch both the new worktrees state file and the legacy .dev-proxy.json.
+  // Either can receive worktrees changes: the new file is the canonical
+  // location, and the legacy file is the fallback for projects that haven't
+  // migrated yet. A single directory watcher covers file creation/deletion
+  // too, so a project that flips from legacy → new mid-session is detected.
   for (const project of config.projects) {
-    const worktreesPath = resolve(project.path, PROJECT_WORKTREES_NAME);
-    const legacyPath = resolve(project.path, PROJECT_CONFIG_NAME);
-    const target = existsSync(worktreesPath)
-      ? worktreesPath
-      : existsSync(legacyPath)
-        ? legacyPath
-        : null;
-    if (!target) continue;
     try {
-      const dir = dirname(target);
-      const base = basename(target);
-      const watcher = watch(dir, (_event, filename) => {
-        if (filename !== base) return;
+      const watcher = watch(project.path, (_event, filename) => {
+        if (filename !== PROJECT_WORKTREES_NAME && filename !== PROJECT_CONFIG_NAME) {
+          return;
+        }
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(readRegistry, 100);
       });

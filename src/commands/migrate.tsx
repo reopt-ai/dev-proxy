@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { Box, Text, render } from "ink";
 import {
   PROJECT_CONFIG_NAME,
-  PROJECT_WORKTREES_NAME,
   readGlobalConfig,
   readProjectConfig,
   writeProjectConfig,
@@ -25,7 +24,6 @@ interface MigrateResult {
 function migrateProject(projectPath: string): MigrateResult {
   const resolution = resolveProjectConfigFile(projectPath);
   const legacyPath = resolve(projectPath, PROJECT_CONFIG_NAME);
-  const worktreesPath = resolve(projectPath, PROJECT_WORKTREES_NAME);
 
   if (resolution?.type === "js") {
     // Already on JS config — only thing left to do is split out worktrees
@@ -34,15 +32,15 @@ function migrateProject(projectPath: string): MigrateResult {
       return { path: projectPath, status: "skipped-js-exists" };
     }
     const cfg = readProjectConfig(projectPath);
-    const hasLegacyWorktrees = cfg.worktrees && Object.keys(cfg.worktrees).length > 0;
-    const newFileExists = existsSync(worktreesPath);
-    if (!hasLegacyWorktrees && newFileExists) {
+    const hasWorktrees = cfg.worktrees && Object.keys(cfg.worktrees).length > 0;
+
+    if (!hasWorktrees) {
+      // Either nothing to migrate, or already split. cleanupLegacyFile is a
+      // no-op when worktreeConfig is present.
       return { path: projectPath, status: "skipped-js-exists" };
     }
 
-    if (hasLegacyWorktrees) {
-      writeProjectConfig(projectPath, { worktrees: cfg.worktrees ?? {} });
-    }
+    writeProjectConfig(projectPath, { worktrees: cfg.worktrees ?? {} });
     cleanupLegacyFile(legacyPath, cfg.worktreeConfig);
     return { path: projectPath, status: "split-worktrees" };
   }
