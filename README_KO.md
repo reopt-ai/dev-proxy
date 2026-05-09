@@ -43,7 +43,7 @@ dev-proxy는:
 - 업스트림 `http`/`https`, `ws`/`wss` 타깃 지원
 - 프로젝트 설정 기반 Git worktree 동적 라우팅
 - [mkcert](https://github.com/FiloSottile/mkcert)를 이용한 TLS 인증서 자동 생성
-- 프로젝트 기반 설정: 전역 (`~/.dev-proxy/config.json`) + 프로젝트별 (라우트는 `dev-proxy.config.mjs`, 워크트리는 `.dev-proxy.json`)
+- 프로젝트 기반 설정: 전역 (`~/.dev-proxy/config.json`) + 프로젝트별 (라우트는 `dev-proxy.config.mjs`, `worktreeConfig`는 `.dev-proxy.json`, CLI가 관리하는 워크트리 맵은 `.dev-proxy.worktrees.json`)
 
 ## 요구 사항
 
@@ -95,11 +95,12 @@ cd dev-proxy && pnpm install && pnpm proxy
 
 ## 설정
 
-설정은 세 개의 파일로 나뉩니다:
+설정은 네 개의 파일로 나뉩니다:
 
 1. **`~/.dev-proxy/config.json`** — 전역 설정 (도메인, 포트, TLS, 프로젝트 목록)
 2. **`<프로젝트>/dev-proxy.config.mjs`** — 프로젝트별 라우트 (표준 형식)
-3. **`<프로젝트>/.dev-proxy.json`** — `worktreeConfig` 와 `worktrees` 인스턴스 맵 (`dev-proxy init`이 빈 placeholder를 자동 생성하며, 워크트리 CLI 명령은 이 파일을 필요로 함)
+3. **`<프로젝트>/.dev-proxy.json`** — `worktreeConfig` (Git worktree 라우팅을 사용할 때만 필요). 사람이 직접 편집합니다.
+4. **`<프로젝트>/.dev-proxy.worktrees.json`** — CLI가 관리하는 워크트리 인스턴스 맵 (`dev-proxy init`이 빈 placeholder를 만들고 워크트리 CLI 명령이 자동 갱신 — 직접 편집하지 마세요)
 
 > 가장 간단한 방법은 프로젝트 디렉터리에서 `dev-proxy init`을 실행하는 것입니다. 마법사가 위 파일들을 자동으로 생성합니다. 아래 섹션은 직접 작성하고 싶을 때 참고하세요.
 
@@ -134,17 +135,18 @@ export default {
 - 여러 프로젝트가 같은 서브도메인을 등록하면 먼저 등록된 것이 우선
 - `certPath`/`keyPath`는 전역 설정에서 지정하며, `~/.dev-proxy/` 기준 상대 경로로 해석됩니다
 - `dev-proxy.config.js`도 지원됩니다 (`package.json`에 `"type": "module"`이 있을 때 사용). 둘 다 있으면 `.mjs`가 우선합니다
-- 런타임 해석 순서: `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (legacy)
+- 런타임 해석 순서: `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (`routes` 레거시 fallback)
+- CLI가 관리하는 `worktrees` 맵은 항상 `.dev-proxy.worktrees.json`에 저장됩니다. `worktreeConfig`(있는 경우)는 `.dev-proxy.json`에 남아 사람이 편집합니다.
 
 ### `.dev-proxy.json`에서 마이그레이션
 
-이전 버전은 라우트를 `.dev-proxy.json`에 저장했습니다. 그 형식도 여전히 동작하지만 `dev-proxy.config.mjs`가 표준으로 자리잡았습니다. 등록된 모든 프로젝트를 한 번에 마이그레이션하려면:
+이전 버전은 모든 것(routes, `worktreeConfig`, `worktrees` 인스턴스 맵)을 `.dev-proxy.json` 한 파일에 담았습니다. 읽기는 여전히 호환되지만, 표준은 `dev-proxy.config.mjs` + `.dev-proxy.worktrees.json` 분리입니다. 등록된 모든 프로젝트를 한 번에 마이그레이션하려면:
 
 ```bash
 dev-proxy migrate
 ```
 
-이 명령은 `.dev-proxy.json`의 `routes`를 `dev-proxy.config.mjs`로 옮기고, `.dev-proxy.json`은 `worktrees`만 남도록 다시 씁니다. 이미 JS 설정을 쓰는 프로젝트는 건너뛰며, 멱등하므로 두 번 실행해도 안전합니다. **마이그레이션 후 `worktreeConfig` 블록은 직접 다시 추가하세요** — `dev-proxy migrate`는 `routes`만 옮기고, `worktreeConfig`는 계속 `.dev-proxy.json`에 남아 있어야 합니다.
+이 명령은 `.dev-proxy.json`의 `routes`를 `dev-proxy.config.mjs`로, `worktrees` 인스턴스 맵을 `.dev-proxy.worktrees.json`으로 옮기고, `worktreeConfig`(있는 경우)는 그대로 `.dev-proxy.json`에 남깁니다. 분리 후 `.dev-proxy.json`이 비게 되면 파일 자체를 삭제합니다. 멱등하며 이미 마이그레이션된 프로젝트는 건너뜁니다.
 
 ### HTTPS
 
@@ -163,7 +165,7 @@ dev-proxy는 Git worktree 기반 동적 라우팅을 지원합니다. 호스트�
 
 **자동 라이프사이클 관리:**
 
-라우트는 `dev-proxy.config.mjs`에, `worktreeConfig`와 `worktrees` 인스턴스 맵은 `.dev-proxy.json`에 둡니다. `services`로 서브도메인별 포트 매핑을 정의하면 dev-proxy가 포트를 자동 할당하고 `.env.local`을 생성하여 dev 서버가 어떤 포트에서 listen할지 알 수 있습니다:
+라우트는 `dev-proxy.config.mjs`에, `worktreeConfig` 스키마는 `.dev-proxy.json`에(직접 작성), 실시간 `worktrees` 인스턴스 맵은 `.dev-proxy.worktrees.json`에(CLI가 관리) 둡니다. `services`로 서브도메인별 포트 매핑을 정의하면 dev-proxy가 포트를 자동 할당하고 `.env.local`을 생성하여 dev 서버가 어떤 포트에서 listen할지 알 수 있습니다:
 
 ```js
 // dev-proxy.config.mjs
@@ -180,9 +182,6 @@ export default {
 ```json
 // .dev-proxy.json
 {
-  "worktrees": {
-    "main": { "ports": { "www": 3001, "data": 4001 } }
-  },
   "worktreeConfig": {
     "portRange": [4101, 5000],
     "directory": "../myproject-{branch}",
@@ -195,6 +194,15 @@ export default {
       "post-create": "pnpm install",
       "post-remove": "echo cleanup done"
     }
+  }
+}
+```
+
+```json
+// .dev-proxy.worktrees.json (CLI가 관리 — 직접 편집 금지)
+{
+  "worktrees": {
+    "main": { "ports": { "www": 3001, "data": 4001 } }
   }
 }
 ```
@@ -353,25 +361,25 @@ Next.js 서비스로 라우팅되는 서브도메인마다 하나씩 추가합�
 
 ## CLI 레퍼런스
 
-| 명령어                                 | 설명                                       |
-| -------------------------------------- | ------------------------------------------ |
-| `dev-proxy`                            | 프록시 시작 + 트래픽 인스펙터              |
-| `dev-proxy init`                       | 인터랙티브 설정 위자드                     |
-| `dev-proxy migrate`                    | `.dev-proxy.json`의 라우트를 `.mjs`로 이동 |
-| `dev-proxy status`                     | 현재 설정 및 라우팅 테이블                 |
-| `dev-proxy doctor`                     | 환경 진단                                  |
-| `dev-proxy config`                     | 글로벌 설정 조회                           |
-| `dev-proxy config set <key> <value>`   | 글로벌 설정 수정 (domain, port, httpsPort) |
-| `dev-proxy project add [path]`         | 프로젝트 등록 (기본: cwd)                  |
-| `dev-proxy project remove <path>`      | 프로젝트 해제                              |
-| `dev-proxy project list`               | 등록된 프로젝트 목록                       |
-| `dev-proxy worktree create <branch>`   | 워크트리 생성 (자동 포트 + 훅 실행)        |
-| `dev-proxy worktree destroy <branch>`  | 워크트리 제거 (훅 실행 + 정리)             |
-| `dev-proxy worktree add <name> <port>` | 워크트리 수동 등록 (git 조작 없음)         |
-| `dev-proxy worktree remove <name>`     | 워크트리 수동 해제                         |
-| `dev-proxy worktree list`              | 워크트리 목록                              |
-| `dev-proxy --help`                     | 도움말                                     |
-| `dev-proxy --version`                  | 버전                                       |
+| 명령어                                 | 설명                                                                     |
+| -------------------------------------- | ------------------------------------------------------------------------ |
+| `dev-proxy`                            | 프록시 시작 + 트래픽 인스펙터                                            |
+| `dev-proxy init`                       | 인터랙티브 설정 위자드                                                   |
+| `dev-proxy migrate`                    | 레거시 `.dev-proxy.json`을 `.mjs` + `.dev-proxy.worktrees.json`으로 분리 |
+| `dev-proxy status`                     | 현재 설정 및 라우팅 테이블                                               |
+| `dev-proxy doctor`                     | 환경 진단                                                                |
+| `dev-proxy config`                     | 글로벌 설정 조회                                                         |
+| `dev-proxy config set <key> <value>`   | 글로벌 설정 수정 (domain, port, httpsPort)                               |
+| `dev-proxy project add [path]`         | 프로젝트 등록 (기본: cwd)                                                |
+| `dev-proxy project remove <path>`      | 프로젝트 해제                                                            |
+| `dev-proxy project list`               | 등록된 프로젝트 목록                                                     |
+| `dev-proxy worktree create <branch>`   | 워크트리 생성 (자동 포트 + 훅 실행)                                      |
+| `dev-proxy worktree destroy <branch>`  | 워크트리 제거 (훅 실행 + 정리)                                           |
+| `dev-proxy worktree add <name> <port>` | 워크트리 수동 등록 (git 조작 없음)                                       |
+| `dev-proxy worktree remove <name>`     | 워크트리 수동 해제                                                       |
+| `dev-proxy worktree list`              | 워크트리 목록                                                            |
+| `dev-proxy --help`                     | 도움말                                                                   |
+| `dev-proxy --version`                  | 버전                                                                     |
 
 ## 구조
 
@@ -394,7 +402,7 @@ src/
 │   ├── config-io.ts       # 설정 I/O 헬퍼 및 포트 할당
 │   └── output.tsx         # 출력 컴포넌트 (Header, Section, Check 등)
 ├── proxy/
-│   ├── config.ts          # 설정 로더 (~/.dev-proxy + dev-proxy.config.mjs / .dev-proxy.json)
+│   ├── config.ts          # 설정 로더 (~/.dev-proxy + .mjs / .dev-proxy.json / .dev-proxy.worktrees.json)
 │   ├── server.ts          # HTTP/WS 리버스 프록시
 │   ├── routes.ts          # 서브도메인 → 타깃 라우팅
 │   ├── certs.ts           # TLS 인증서 해석 (mkcert)

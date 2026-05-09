@@ -46,11 +46,11 @@ dev-proxy init
 
 - `~/.dev-proxy/config.json` (creating or updating the `projects` array)
 - `<project path>/dev-proxy.config.mjs` (routes — the canonical project config)
-- `<project path>/.dev-proxy.json` (empty `{ "worktrees": {} }` placeholder)
+- `<project path>/.dev-proxy.worktrees.json` (empty `{ "worktrees": {} }` placeholder — CLI-managed)
 
 If a `dev-proxy.config.mjs` already exists, the wizard asks before overwriting. Skip Step 3B and continue at Step 4.
 
-> **Worktree support is not part of the wizard.** If the user wants worktrees, finish `init`, then add the `worktreeConfig` block to `.dev-proxy.json` as shown in Step 3B (substep 3).
+> **Worktree support is not part of the wizard.** If the user wants worktrees, finish `init`, then add a `worktreeConfig` block to `.dev-proxy.json` (create the file if it doesn't exist) as shown in Step 3B (substep 3).
 
 ## Step 3B: Configure (Manual)
 
@@ -79,7 +79,7 @@ Then write `~/.dev-proxy/config.json` — replace placeholders with the user's a
 
 ### 2. Project config (routes)
 
-Routes live in **`<project path>/dev-proxy.config.mjs`** — this is the canonical format. Do not place routes in `.dev-proxy.json`; that file is reserved for the worktree instance map (see substep 3).
+Routes live in **`<project path>/dev-proxy.config.mjs`** — this is the canonical format. Do not place routes in `.dev-proxy.json`; that file is reserved for the optional `worktreeConfig` schema (see substep 3). The CLI-managed worktree instance map lives in a separate `.dev-proxy.worktrees.json`.
 
 If a `dev-proxy.config.mjs` already exists, read it first and merge — do not overwrite existing routes.
 
@@ -105,7 +105,6 @@ If the user wants worktrees, add `worktreeConfig` to **`<project path>/.dev-prox
 
 ```json
 {
-  "worktrees": {},
   "worktreeConfig": {
     "portRange": [4101, 5000],
     "directory": "../<project-name>-{branch}",
@@ -122,18 +121,18 @@ If the user wants worktrees, add `worktreeConfig` to **`<project path>/.dev-prox
 }
 ```
 
-Routes still live in `dev-proxy.config.mjs` from substep 2 — only `worktreeConfig` and the `worktrees` map go into `.dev-proxy.json`.
+Routes still live in `dev-proxy.config.mjs` from substep 2 — only `worktreeConfig` goes into `.dev-proxy.json`. The live `worktrees` instance map lives in `.dev-proxy.worktrees.json` and is managed entirely by the CLI.
 
 When `dev-proxy worktree create <branch>` runs, it:
 
 1. Allocates one port per service from `portRange`
 2. Writes the env file (e.g., `.env.local`) with the port assignments: `PORT=4101`, `DATA_PORT=4102`
-3. Updates `.dev-proxy.json` to record the new worktree's ports
+3. Updates `.dev-proxy.worktrees.json` to record the new worktree's ports
 4. The app reads `.env.local` to know which port to listen on — works with Next.js, Vite, and most Node.js frameworks
 
 The `{branch}` placeholder in `directory` is replaced with the branch name at runtime.
 
-> **File-split summary.** Routes → `dev-proxy.config.mjs` (you author this). `worktreeConfig` + `worktrees` map → `.dev-proxy.json` (you author `worktreeConfig`; the CLI manages the `worktrees` map). Both files are safe to commit so teammates share the same setup.
+> **File-split summary.** Routes → `dev-proxy.config.mjs` (you author this). `worktreeConfig` schema → `.dev-proxy.json` (you author this). Live `worktrees` map → `.dev-proxy.worktrees.json` (the CLI manages this — do not hand-edit). All three files are safe to commit so teammates share the same setup.
 
 ## Step 4: DNS Setup
 
@@ -247,7 +246,7 @@ To run in the background, use a terminal multiplexer or a separate terminal tab.
 
 ## Migrating from `.dev-proxy.json`
 
-Earlier versions of dev-proxy stored routes in `.dev-proxy.json`. That format still works, but `dev-proxy.config.mjs` is now the documented default — it supports comments, type hints (`/** @type {import('@reopt-ai/dev-proxy').Config} */`), and dynamic logic.
+Earlier versions of dev-proxy stored everything (routes, `worktreeConfig`, and the `worktrees` instance map) in a single `.dev-proxy.json`. That layout still works at read time, but the documented split is `dev-proxy.config.mjs` (routes) + `.dev-proxy.json` (`worktreeConfig` only) + `.dev-proxy.worktrees.json` (CLI-managed instance map).
 
 To migrate every project registered in `~/.dev-proxy/config.json` in one shot:
 
@@ -257,19 +256,17 @@ dev-proxy migrate
 
 For each project, this command:
 
-1. Reads `routes` from `.dev-proxy.json`.
-2. Writes them to `dev-proxy.config.mjs` (skipped if a JS config already exists).
-3. Rewrites `.dev-proxy.json` to contain only `worktrees` (per-worktree port assignments).
+1. Reads `routes` from `.dev-proxy.json` (if any) and writes them to `dev-proxy.config.mjs`.
+2. Moves the `worktrees` instance map into `.dev-proxy.worktrees.json`.
+3. Leaves `worktreeConfig` (if any) in `.dev-proxy.json`. If `.dev-proxy.json` would otherwise be empty after the split, the file is removed.
 
-Projects already on `dev-proxy.config.mjs` / `.js` are skipped. The command is idempotent — running it twice is safe.
+Projects already migrated are skipped. The command is idempotent — running it twice is safe.
 
-> **`worktreeConfig` is preserved-but-not-copied.** `dev-proxy migrate` only moves `routes`. If your `.dev-proxy.json` had a `worktreeConfig` block, **re-add it manually** to the rewritten `.dev-proxy.json` after migration — `worktreeConfig` continues to live in `.dev-proxy.json`, not in the `.mjs` file.
-
-> **Resolution order at runtime:** `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json`. The first one found wins for routes; `worktrees` (the runtime instance map) always comes from `.dev-proxy.json` regardless of which routes file is used.
+> **Resolution order at runtime:** `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (legacy fallback for `routes`). The CLI-managed `worktrees` map is read from `.dev-proxy.worktrees.json` first; the legacy `worktrees` key inside `.dev-proxy.json` only acts as a fallback for projects that haven't run `migrate` yet.
 
 ## Managing Projects
 
-Add another project (this also creates an empty `.dev-proxy.json` template if one doesn't exist; you still need to add `dev-proxy.config.mjs` with routes):
+Add another project (this also creates an empty `.dev-proxy.worktrees.json` placeholder if one doesn't exist; you still need to add `dev-proxy.config.mjs` with routes):
 
 ```bash
 dev-proxy project add /path/to/another/project
@@ -323,4 +320,5 @@ Common issues:
 - **HTTPS not working** — Ensure mkcert is installed (`which mkcert`) and the local CA is set up (`mkcert -install`).
 - **Config not loading** — Run `dev-proxy status` to see what config is actually loaded. Check file paths and that `dev-proxy.config.mjs` has a default export.
 - **Routes seem stale after editing `.dev-proxy.json`** — If `dev-proxy.config.mjs` exists, routes are read from there and `.dev-proxy.json` `routes` are ignored. Either edit the `.mjs` file or delete it to fall back to JSON.
+- **Worktrees not appearing after editing `.dev-proxy.worktrees.json` by hand** — That file is CLI-managed; the recommended path is `dev-proxy worktree create/add` so the in-memory registry stays in sync. Manual edits will be picked up on the next file-watch tick, but the CLI may overwrite them.
 - **Next.js HMR not working / origin errors** — Next.js >= 15.0 validates request origins. Add `allowedDevOrigins` to `next.config.mjs` with each proxy subdomain URL (e.g., `["http://web.localhost:3000"]`). See the [Next.js docs on allowedDevOrigins](https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins).
