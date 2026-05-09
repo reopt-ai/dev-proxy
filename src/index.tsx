@@ -8,6 +8,7 @@ import {
   config,
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_NAME,
+  PROJECT_WORKTREES_NAME,
 } from "./proxy/config.js";
 import { rebuildRoutes } from "./proxy/routes.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
@@ -148,11 +149,13 @@ function watchFile(dir: string, base: string): void {
 // Watch global config
 watchFile(dirname(GLOBAL_CONFIG_PATH), basename(GLOBAL_CONFIG_PATH));
 
-// Watch each project config (JS config file + .dev-proxy.json for worktrees)
+// Watch each project config (primary config file + worktrees state file)
 for (const project of config.projects) {
-  // Watch the primary config file (JS or JSON)
+  // Watch the primary config file (JS or legacy JSON)
   watchFile(dirname(project.configPath), basename(project.configPath));
-  // If using JS config, also watch .dev-proxy.json for worktree changes
+  // Always watch the worktrees state file. For JS-config projects, also watch
+  // the legacy .dev-proxy.json so projects mid-migration still hot-reload.
+  watchFile(project.path, PROJECT_WORKTREES_NAME);
   if (project.configType === "js") {
     watchFile(project.path, PROJECT_CONFIG_NAME);
   }

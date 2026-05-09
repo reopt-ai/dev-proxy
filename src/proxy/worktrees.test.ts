@@ -20,6 +20,7 @@ const configMock = {
     projects: [] as ProjectConfig[],
   },
   PROJECT_CONFIG_NAME: ".dev-proxy.json",
+  PROJECT_WORKTREES_NAME: ".dev-proxy.worktrees.json",
 };
 
 vi.mock("./config.js", () => configMock);
@@ -162,6 +163,31 @@ describe("readProjectWorktrees", () => {
 
     const result = readProjectWorktrees(project);
     expect(result).toEqual({ cached: { ports: { web: 7000 } } });
+  });
+
+  it("prefers .dev-proxy.worktrees.json when both files exist", () => {
+    const project = makeProject();
+    fsMock.existsSync.mockReturnValue(true);
+    fsMock.readFileSync.mockImplementation((p: string) => {
+      if (p.endsWith(".dev-proxy.worktrees.json")) {
+        return JSON.stringify({ worktrees: { winner: { port: 4000 } } });
+      }
+      return JSON.stringify({ worktrees: { loser: { port: 9999 } } });
+    });
+
+    const result = readProjectWorktrees(project);
+    expect(result).toEqual({ winner: { port: 4000 } });
+  });
+
+  it("falls back to legacy .dev-proxy.json when new file is missing", () => {
+    const project = makeProject();
+    fsMock.existsSync.mockImplementation((p: string) => p.endsWith("/.dev-proxy.json"));
+    fsMock.readFileSync.mockReturnValue(
+      JSON.stringify({ worktrees: { legacy: { port: 5000 } } }),
+    );
+
+    const result = readProjectWorktrees(project);
+    expect(result).toEqual({ legacy: { port: 5000 } });
   });
 });
 
@@ -373,7 +399,7 @@ describe("loadRegistry / stopRegistry", () => {
     loadRegistry();
 
     // Trigger a file change to start the debounce timer
-    watchCallback("change", ".dev-proxy.json");
+    watchCallback("change", ".dev-proxy.worktrees.json");
     expect(__testing.debounceTimer).not.toBeNull();
 
     // Stop should clear the timer

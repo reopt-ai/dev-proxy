@@ -292,7 +292,7 @@ describe("loadJsConfig", () => {
 // ── loadProjectConfig with JS config ─────────────────────────
 
 describe("loadProjectConfig (JS config path)", () => {
-  it("loads routes from JS config and worktrees from JSON", async () => {
+  it("loads routes from JS config and worktrees from legacy .dev-proxy.json", async () => {
     const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
     const jsPath = join(tmpDir, "dev-proxy.config.js");
     const jsonPath = join(tmpDir, ".dev-proxy.json");
@@ -318,6 +318,34 @@ describe("loadProjectConfig (JS config path)", () => {
       expect(result?.configType).toBe("js");
       expect(result?.routes).toEqual({ web: "http://localhost:3000" });
       expect(result?.worktrees).toEqual({ feat: { port: 5000 } });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("prefers .dev-proxy.worktrees.json over legacy .dev-proxy.json", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const jsPath = join(tmpDir, "dev-proxy.config.js");
+    const worktreesPath = join(tmpDir, ".dev-proxy.worktrees.json");
+    const legacyPath = join(tmpDir, ".dev-proxy.json");
+    realFs.writeFileSync(jsPath, "export default { routes: {} };\n");
+
+    fsMock.existsSync.mockImplementation(
+      (p: string) => p === jsPath || p === worktreesPath || p === legacyPath,
+    );
+    fsMock.readFileSync.mockImplementation((p: string) => {
+      if (p === worktreesPath) {
+        return JSON.stringify({ worktrees: { winner: { port: 4000 } } });
+      }
+      if (p === legacyPath) {
+        return JSON.stringify({ worktrees: { loser: { port: 9999 } } });
+      }
+      return "";
+    });
+
+    try {
+      const result = await loadProjectConfig(tmpDir);
+      expect(result?.worktrees).toEqual({ winner: { port: 4000 } });
     } finally {
       realFs.rmSync(tmpDir, { recursive: true });
     }

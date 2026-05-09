@@ -16,6 +16,7 @@ import {
   CONFIG_DIR,
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_NAME,
+  PROJECT_WORKTREES_NAME,
   JS_CONFIG_NAMES,
   resolveProjectConfigFile,
 } from "../proxy/config.js";
@@ -24,6 +25,7 @@ export {
   CONFIG_DIR,
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_NAME,
+  PROJECT_WORKTREES_NAME,
   JS_CONFIG_NAMES,
   resolveProjectConfigFile,
 };
@@ -128,21 +130,51 @@ export interface RawProjectConfig {
   worktreeConfig?: WorktreeConfig;
 }
 
-export function readProjectConfig(projectPath: string): RawProjectConfig {
-  const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
+function readJsonFile(filePath: string): unknown {
   try {
-    if (existsSync(configPath)) {
-      return JSON.parse(readFileSync(configPath, "utf-8")) as RawProjectConfig;
+    if (existsSync(filePath)) {
+      return JSON.parse(readFileSync(filePath, "utf-8"));
     }
   } catch (err) {
-    console.warn(`[dev-proxy] Failed to parse ${configPath}: ${(err as Error).message}`);
+    console.warn(`[dev-proxy] Failed to parse ${filePath}: ${(err as Error).message}`);
   }
-  return {};
+  return null;
 }
 
+/**
+ * Returns a merged view of legacy `.dev-proxy.json` and the new
+ * `.dev-proxy.worktrees.json`. Worktrees in the new file take precedence.
+ */
+export function readProjectConfig(projectPath: string): RawProjectConfig {
+  const legacyPath = resolve(projectPath, PROJECT_CONFIG_NAME);
+  const worktreesPath = resolve(projectPath, PROJECT_WORKTREES_NAME);
+
+  const legacy = (readJsonFile(legacyPath) as RawProjectConfig | null) ?? {};
+  const worktreesFile = readJsonFile(worktreesPath) as RawProjectConfig | null;
+
+  if (worktreesFile?.worktrees) {
+    return { ...legacy, worktrees: worktreesFile.worktrees };
+  }
+  return legacy;
+}
+
+/**
+ * Splits cfg into two files: `worktrees` → `.dev-proxy.worktrees.json`,
+ * everything else (`routes`, `worktreeConfig`) → `.dev-proxy.json`. Either
+ * file is skipped when it would have nothing to write.
+ */
 export function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): void {
-  const configPath = resolve(projectPath, PROJECT_CONFIG_NAME);
-  atomicWriteFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n");
+  const { worktrees, ...rest } = cfg;
+
+  if (worktrees !== undefined) {
+    const worktreesPath = resolve(projectPath, PROJECT_WORKTREES_NAME);
+    atomicWriteFileSync(worktreesPath, JSON.stringify({ worktrees }, null, 2) + "\n");
+  }
+
+  if (Object.keys(rest).length > 0) {
+    const legacyPath = resolve(projectPath, PROJECT_CONFIG_NAME);
+    atomicWriteFileSync(legacyPath, JSON.stringify(rest, null, 2) + "\n");
+  }
 }
 
 // ── JS config generation ────────────────────────────────────
