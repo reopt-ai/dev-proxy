@@ -123,6 +123,7 @@ cd dev-proxy && pnpm install && pnpm proxy
 /** @type {import('@reopt-ai/dev-proxy').Config} */
 export default {
   routes: {
+    "@": "http://localhost:3005",
     www: "http://localhost:3001",
     studio: "http://localhost:3001",
     api: "http://localhost:4000",
@@ -131,6 +132,7 @@ export default {
 };
 ```
 
+- `"@"`는 **apex(bare) 도메인** — 서브도메인 없는 도메인 자체(예: `reopt.de`)를 가리킵니다. 선택사항이며, 없으면 `"*"`로 fallback.
 - `"*"`는 와일드카드 — 매칭되지 않는 서브도메인이 이 타깃으로 라우팅됩니다
 - 여러 프로젝트가 같은 서브도메인을 등록하면 먼저 등록된 것이 우선
 - `certPath`/`keyPath`는 전역 설정에서 지정하며, `~/.dev-proxy/` 기준 상대 경로로 해석됩니다

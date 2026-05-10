@@ -97,6 +97,11 @@ export default {
 
 Only include the `"*"` entry if the user provided a default port in Step 2.
 
+Two special keys:
+
+- `"@"` — **apex (bare) domain**. Matches the bare domain itself (e.g. `reopt.de` with no subdomain). Use when you want the bare domain to route somewhere different from `"*"`. Optional; if absent, the bare domain falls back to `"*"`.
+- `"*"` — **wildcard**. Matches any subdomain that doesn't have an explicit entry.
+
 > **Why `.mjs`?** dev-proxy is ESM-only. `.mjs` works in any project regardless of the package's `"type"` field. `dev-proxy.config.js` is also accepted (used when `package.json` has `"type": "module"`); `.mjs` takes precedence if both exist.
 
 ### 3. Worktree support (optional)
