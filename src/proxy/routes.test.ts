@@ -129,6 +129,33 @@ describe("parseHost", () => {
       worktree: "",
     });
   });
+
+  it("returns APEX_KEY when host equals the configured domain", () => {
+    expect(parseHost("test.dev:3000")).toEqual({
+      app: "@",
+      worktree: null,
+    });
+    expect(parseHost("test.dev")).toEqual({
+      app: "@",
+      worktree: null,
+    });
+  });
+
+  it("normalizes case when matching apex", () => {
+    expect(parseHost("Test.Dev:3000")).toEqual({
+      app: "@",
+      worktree: null,
+    });
+  });
+
+  it("worktree on apex still routes through worktree, not APEX_KEY", () => {
+    // branch--<domain> parses subdomain="branch--test", which contains "--"
+    // and short-circuits before the apex check.
+    expect(parseHost("feature--test.dev:3000")).toEqual({
+      app: "test",
+      worktree: "feature",
+    });
+  });
 });
 
 // ── Route parsing (module-level config → parsedRoutes) ─────
@@ -385,6 +412,47 @@ describe("getTarget", () => {
     expect(result.worktree).toBeNull();
     expect(result.url).not.toBeNull();
     expect(result.url?.origin).toBe("http://localhost:4001");
+  });
+
+  it('apex host falls back to wildcard when no "@" route is configured', () => {
+    // The default mockConfig has no "@" entry, so apex falls through to "*".
+    const result = getTarget("test.dev:3000");
+    expect(result.url?.origin).toBe("http://localhost:5000");
+    expect(result.worktree).toBeNull();
+  });
+
+  it('apex host resolves to "@" route when configured', async () => {
+    vi.doMock("./config.js", () => ({
+      config: {
+        domain: "test.dev",
+        port: 3000,
+        httpsPort: 3443,
+        projects: [
+          {
+            path: "/projects/apex",
+            configPath: "/projects/apex/.dev-proxy.json",
+            configType: "json",
+            routes: {
+              "@": "http://localhost:3500",
+              "*": "http://localhost:5000",
+            },
+            worktrees: {},
+          },
+        ],
+      },
+    }));
+
+    vi.resetModules();
+    const mod = await import("./routes.js");
+    const result = mod.getTarget("test.dev:3000");
+    expect(result.url?.origin).toBe("http://localhost:3500");
+    expect(result.worktree).toBeNull();
+
+    // Unknown subdomain still hits "*"
+    const fallback = mod.getTarget("unknown.test.dev:3000");
+    expect(fallback.url?.origin).toBe("http://localhost:5000");
+
+    vi.doUnmock("./config.js");
   });
 });
 

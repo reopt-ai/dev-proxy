@@ -206,9 +206,14 @@ export function isValidPort(value: number): boolean {
 
 const SUBDOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-/** Validate a subdomain label (lowercase alphanumeric + hyphens, no leading/trailing hyphen). */
+/**
+ * Validate a route key. Accepts:
+ *   - `"*"` — wildcard for unmatched subdomains
+ *   - `"@"` — apex (bare domain — e.g. `reopt.de` itself)
+ *   - lowercase alphanumeric + hyphens, no leading/trailing hyphen
+ */
 export function isValidSubdomain(value: string): boolean {
-  return value === "*" || SUBDOMAIN_RE.test(value);
+  return value === "*" || value === "@" || SUBDOMAIN_RE.test(value);
 }
 
 // ── Port allocation ──────────────────────────────────────────

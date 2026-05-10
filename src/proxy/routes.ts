@@ -5,6 +5,9 @@ import { getWorktreeTarget } from "./worktrees.js";
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
+/** Sentinel route key for the apex (bare) domain — e.g. `reopt.de` itself. */
+export const APEX_KEY = "@";
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function formatTarget(url: URL): string {
@@ -152,6 +155,10 @@ export function parseHost(host: string): {
       worktree: subdomain.slice(0, delimIdx),
       app: subdomain.slice(delimIdx + 2),
     };
+  }
+  // Bare/apex domain (host equals the configured domain) gets its own key.
+  if (hostOnly === config.domain.toLowerCase()) {
+    return { app: APEX_KEY, worktree: null };
   }
   return { app: subdomain, worktree: null };
 }
