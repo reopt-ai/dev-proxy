@@ -61,18 +61,23 @@ array — these will be preserved. If this project's path is already in
 
 ### 1.4 Check for legacy project config
 
-If `.dev-proxy.json` exists in the project root and contains a `routes` key,
-this is a legacy JSON-only config. Inform the user and suggest:
+If `.dev-proxy.json` exists in the project root and contains a `routes` key
+(or a `worktrees` key without a sibling `.dev-proxy.worktrees.json`), this is a
+pre-split layout. Inform the user and suggest:
 
 ```bash
 dev-proxy migrate
 ```
 
-This moves the routes into `dev-proxy.config.mjs` and rewrites
-`.dev-proxy.json` to keep only `worktrees`. **Note:** `dev-proxy migrate`
-does **not** copy `worktreeConfig` — if the legacy file had one, you must
-add it back to `.dev-proxy.json` after migration (see Phase 3.3). If the
-user chooses to migrate, run the command, then continue at Phase 3.3.
+The command splits the legacy file three ways:
+
+- `routes` → `dev-proxy.config.mjs`
+- `worktrees` instance map → `.dev-proxy.worktrees.json` (new file, CLI-managed)
+- `worktreeConfig` → stays in `.dev-proxy.json` (the legacy file is removed if
+  it would otherwise be empty)
+
+It is idempotent. If the user chooses to migrate, run the command, then
+continue at Phase 3.3.
 
 ---
 
@@ -161,19 +166,25 @@ Is this correct? Would you like to add, remove, or change any routes?
 
 ## Phase 3: Generate Configuration
 
-There are two project-level files:
+There are up to three project-level files:
 
-- **`dev-proxy.config.mjs`** — routes (the main config users edit by hand)
-- **`.dev-proxy.json`** — `worktreeConfig` (when worktrees are used) and the
-  `worktrees` instance map managed by the CLI
+- **`dev-proxy.config.mjs`** — routes (the main config users edit by hand).
+  Always created by `dev-proxy init`.
+- **`.dev-proxy.json`** — `worktreeConfig` schema (only required when worktrees
+  are used). Hand-edited.
+- **`.dev-proxy.worktrees.json`** — CLI-managed worktree instance map. `init`
+  writes an empty placeholder; `dev-proxy worktree create/destroy/add/remove`
+  keep it in sync. **Do not hand-edit.**
 
-Both files are project configuration and should be committed to git.
+All three are project configuration and should be committed to git.
 
 > **Note on `.mjs` vs `.js`:** `dev-proxy init` writes `dev-proxy.config.mjs`
 > by default. `dev-proxy.config.js` is also accepted (used in projects that
 > already have `"type": "module"` in `package.json`). Both forms work the
 > same way; pick one. Resolution order at runtime is `.mjs` → `.js` → legacy
-> `.dev-proxy.json` for routes.
+> `.dev-proxy.json` for routes. The `worktrees` map is read from
+> `.dev-proxy.worktrees.json` first, falling back to a `worktrees` key in
+> the legacy `.dev-proxy.json` for projects mid-migration.
 
 ### 3.1 Global config (`~/.dev-proxy/config.json`)
 
@@ -231,23 +242,26 @@ Format rules:
 > in the `.mjs` file will silently do nothing and `dev-proxy worktree create`
 > will fail with `worktreeConfig not configured in .dev-proxy.json`.
 
-### 3.3 Worktree config and runtime state (`.dev-proxy.json`)
+### 3.3 Worktree config (`.dev-proxy.json`) and instance map (`.dev-proxy.worktrees.json`)
 
-This file holds two things:
+The two roles are now in two separate files:
 
-1. `worktreeConfig` — user-authored worktree settings (port range, directory
-   pattern, services, hooks)
-2. `worktrees` — runtime instance map managed by `dev-proxy worktree create/destroy`
+1. **`.dev-proxy.json`** holds `worktreeConfig` — user-authored worktree
+   settings (port range, directory pattern, services, hooks). Hand-edited.
+   Only required if the user wants worktree support.
+2. **`.dev-proxy.worktrees.json`** holds the live `worktrees` instance map
+   that `dev-proxy worktree create/destroy/add/remove` rewrite. `dev-proxy
+init` always creates this as `{ "worktrees": {} }` so the CLI commands
+   have a place to write to.
 
-If the user does not need worktree support, `dev-proxy init` still creates an
-empty placeholder (`{ "worktrees": {} }`) but no further setup is required —
-skip the rest of this section.
+If the user does not need worktree support, the empty
+`.dev-proxy.worktrees.json` placeholder is enough — skip the rest of this
+section. Do **not** create `.dev-proxy.json` in that case.
 
 If the user **wants worktree support**, write `.dev-proxy.json`:
 
 ```json
 {
-  "worktrees": {},
   "worktreeConfig": {
     "portRange": [4101, 5000],
     "directory": "../<project-name>-{branch}",
@@ -272,9 +286,9 @@ Ask the user for:
 - Post-create hook (e.g., `pnpm install`, `npm install`) — optional
 - Post-remove hook — optional
 
-`.dev-proxy.json` should be **committed to git** — both the `worktreeConfig`
-block and the `worktrees` instance map are project configuration that
-teammates need.
+Both files should be **committed to git**: `.dev-proxy.json` is hand-edited
+schema and `.dev-proxy.worktrees.json` is shared worktree state teammates
+need to share.
 
 ### 3.4 Framework-specific setup
 
@@ -422,10 +436,11 @@ Output the final setup summary:
 ```
 dev-proxy setup complete!
 
-  Routes:    <project-path>/dev-proxy.config.mjs
-  Worktrees: <project-path>/.dev-proxy.json
-  Global:    ~/.dev-proxy/config.json
-  Domain:    <domain>
+  Routes:          <project-path>/dev-proxy.config.mjs
+  Worktree map:    <project-path>/.dev-proxy.worktrees.json (CLI-managed)
+  Worktree config: <project-path>/.dev-proxy.json (only if worktrees enabled)
+  Global:          ~/.dev-proxy/config.json
+  Domain:          <domain>
 
   Routes:
     http://web.<domain>:3000 → localhost:3001
@@ -448,8 +463,9 @@ dev-proxy setup complete!
 - Always use `http://localhost:<port>` format for route targets (not bare ports)
 - The `"*"` wildcard route is optional — only add if the user wants a fallback
 - `dev-proxy.config.mjs` holds **routes only** — do not add `worktreeConfig` here (the runtime ignores it; worktree commands look in `.dev-proxy.json`)
-- `.dev-proxy.json` holds `worktreeConfig` (when worktrees are used) and the `worktrees` instance map managed by the CLI
-- Both `dev-proxy.config.mjs` and `.dev-proxy.json` should be **committed to git** — both are project configuration shared across teammates
-- If the project already has a `.dev-proxy.json` with routes (legacy format), suggest running `dev-proxy migrate` to convert routes to `dev-proxy.config.mjs` (note: `dev-proxy migrate` does not move `worktreeConfig` — re-add it manually if present)
+- `.dev-proxy.json` holds **`worktreeConfig` only** (when worktrees are used) — not the live `worktrees` instance map
+- `.dev-proxy.worktrees.json` holds the **CLI-managed `worktrees` instance map** — never hand-edit it; `dev-proxy worktree create/destroy/add/remove` keep it in sync
+- All three files should be **committed to git** — they are shared project configuration teammates need
+- If the project already has a `.dev-proxy.json` with routes or with a `worktrees` key sitting next to no `.dev-proxy.worktrees.json`, suggest running `dev-proxy migrate` — it splits routes into `.mjs`, `worktrees` into `.dev-proxy.worktrees.json`, leaves `worktreeConfig` in place, and removes `.dev-proxy.json` if nothing else remains
 - Never modify the user's application code, `.env` files, or `package.json`
 - Always confirm the proposed route map before writing any files

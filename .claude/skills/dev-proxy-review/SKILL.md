@@ -120,6 +120,7 @@ Read `docs/guide/installation.md`. Verify:
 - Config JSON examples match the `RawGlobalConfig` and `RawProjectConfig` interfaces in `src/cli/config-io.ts`
 - `worktreeConfig` example matches the `WorktreeConfig` interface
 - All CLI commands referenced actually exist
+- The three project config files (`dev-proxy.config.mjs` for routes, `.dev-proxy.json` for `worktreeConfig`, `.dev-proxy.worktrees.json` for the CLI-managed worktree instance map) are described accurately and consistently with `PROJECT_CONFIG_NAME` / `PROJECT_WORKTREES_NAME` in `src/proxy/config.ts`
 
 ### 2.5 Help text
 

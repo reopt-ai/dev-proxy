@@ -29,6 +29,7 @@ const writeJsConfigMock = vi.fn();
 
 vi.mock("../cli/config-io.js", () => ({
   PROJECT_CONFIG_NAME: ".dev-proxy.json",
+  PROJECT_WORKTREES_NAME: ".dev-proxy.worktrees.json",
   readGlobalConfig: vi.fn(() => ({ projects: [] })),
   readProjectConfig: readProjectConfigMock,
   writeProjectConfig: writeProjectConfigMock,
@@ -111,7 +112,7 @@ describe("migrateProject", () => {
     });
   });
 
-  it("preserves worktrees in .dev-proxy.json after migration", () => {
+  it("moves worktrees through writeProjectConfig (split into new file)", () => {
     resolveProjectConfigFileMock.mockReturnValue(null);
     mockExistsSync.mockReturnValue(true);
     readProjectConfigMock.mockReturnValue({
@@ -129,6 +130,56 @@ describe("migrateProject", () => {
         feat2: { ports: { web: 5002, api: 5003 } },
       },
     });
+  });
+
+  it("preserves worktreeConfig alongside worktrees during migration", () => {
+    resolveProjectConfigFileMock.mockReturnValue(null);
+    mockExistsSync.mockReturnValue(true);
+    const worktreeConfig = {
+      portRange: [4000, 5000] as [number, number],
+      directory: "../{branch}",
+    };
+    readProjectConfigMock.mockReturnValue({
+      routes: { app: "http://localhost:3000" },
+      worktrees: { feat: { port: 5001 } },
+      worktreeConfig,
+    });
+
+    migrateProject("/p");
+    expect(writeProjectConfigMock).toHaveBeenCalledWith("/p", {
+      worktrees: { feat: { port: 5001 } },
+      worktreeConfig,
+    });
+  });
+
+  it('returns "split-worktrees" when JS config exists and legacy file still has worktrees', () => {
+    resolveProjectConfigFileMock.mockReturnValue({
+      type: "js",
+      path: "/p/dev-proxy.config.mjs",
+    });
+    mockExistsSync.mockReturnValue(true);
+    readProjectConfigMock.mockReturnValue({
+      worktrees: { stale: { port: 6000 } },
+    });
+
+    const result = migrateProject("/p");
+    expect(result).toEqual({ path: "/p", status: "split-worktrees" });
+    expect(writeProjectConfigMock).toHaveBeenCalledWith("/p", {
+      worktrees: { stale: { port: 6000 } },
+    });
+    expect(writeJsConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('still returns "skipped-js-exists" when JS config has no legacy file at all', () => {
+    resolveProjectConfigFileMock.mockReturnValue({
+      type: "js",
+      path: "/p/dev-proxy.config.mjs",
+    });
+    mockExistsSync.mockReturnValue(false);
+
+    const result = migrateProject("/p");
+    expect(result).toEqual({ path: "/p", status: "skipped-js-exists" });
+    expect(writeProjectConfigMock).not.toHaveBeenCalled();
   });
 
   it("handles routes with wildcard correctly", () => {

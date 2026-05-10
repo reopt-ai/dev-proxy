@@ -5,12 +5,15 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../cli/config-io.js", () => ({
   CONFIG_DIR: "/mock/.dev-proxy",
   GLOBAL_CONFIG_PATH: "/mock/.dev-proxy/config.json",
-  PROJECT_CONFIG_NAME: ".dev-proxy.json",
+  PROJECT_WORKTREES_NAME: ".dev-proxy.worktrees.json",
+  JS_CONFIG_NAMES: ["dev-proxy.config.mjs", "dev-proxy.config.js"],
   isValidPort: (v: number) => Number.isInteger(v) && v > 0 && v <= 65535,
   isValidSubdomain: (v: string) => v === "*" || /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(v),
   readGlobalConfig: vi.fn(() => ({})),
   writeGlobalConfig: vi.fn(),
   writeProjectConfig: vi.fn(),
+  writeJsConfig: vi.fn(),
+  resolveProjectConfigFile: vi.fn(() => null),
 }));
 
 vi.mock("../cli/output.js", () => ({

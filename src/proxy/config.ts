@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 export const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
 export const GLOBAL_CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
 export const PROJECT_CONFIG_NAME = ".dev-proxy.json";
+export const PROJECT_WORKTREES_NAME = ".dev-proxy.worktrees.json";
 export const JS_CONFIG_NAMES = ["dev-proxy.config.mjs", "dev-proxy.config.js"];
 
 // ── Types ────────────────────────────────────────────────────
@@ -114,6 +115,17 @@ async function loadJsConfig(filePath: string): Promise<RawJsConfig | null> {
 
 // ── Project loader ──────────────────────────────────────────
 
+function loadWorktrees(projectDir: string): Record<string, WorktreeEntry> {
+  // Prefer .dev-proxy.worktrees.json; fall back to legacy `worktrees` key in .dev-proxy.json
+  const worktreesPath = resolve(projectDir, PROJECT_WORKTREES_NAME);
+  const worktreesRaw = loadJson(worktreesPath) as RawProjectConfig | null;
+  if (worktreesRaw?.worktrees) return worktreesRaw.worktrees;
+
+  const legacyPath = resolve(projectDir, PROJECT_CONFIG_NAME);
+  const legacyRaw = loadJson(legacyPath) as RawProjectConfig | null;
+  return legacyRaw?.worktrees ?? {};
+}
+
 async function loadProjectConfig(projectDir: string): Promise<ProjectConfig | null> {
   const resolution = resolveProjectConfigFile(projectDir);
   if (!resolution) return null;
@@ -122,20 +134,16 @@ async function loadProjectConfig(projectDir: string): Promise<ProjectConfig | nu
     const jsConfig = await loadJsConfig(resolution.path);
     if (!jsConfig) return null;
 
-    // Worktrees always come from .dev-proxy.json
-    const jsonPath = resolve(projectDir, PROJECT_CONFIG_NAME);
-    const jsonRaw = loadJson(jsonPath) as RawProjectConfig | null;
-
     return {
       path: projectDir,
       configPath: resolution.path,
       configType: "js",
       routes: jsConfig.routes ?? {},
-      worktrees: jsonRaw?.worktrees ?? {},
+      worktrees: loadWorktrees(projectDir),
     };
   }
 
-  // Legacy JSON-only config
+  // Legacy JSON-only config — routes still come from .dev-proxy.json
   const raw = loadJson(resolution.path) as RawProjectConfig | null;
   if (!raw) return null;
   return {
@@ -143,7 +151,7 @@ async function loadProjectConfig(projectDir: string): Promise<ProjectConfig | nu
     configPath: resolution.path,
     configType: "json",
     routes: raw.routes ?? {},
-    worktrees: raw.worktrees ?? {},
+    worktrees: loadWorktrees(projectDir),
   };
 }
 
@@ -169,7 +177,7 @@ async function loadConfig(): Promise<ResolvedConfig> {
         projects.push(project);
       } else {
         console.error(
-          `[dev-proxy] Project ${resolved}: no config found (tried ${JS_CONFIG_NAMES.join(", ")}, ${PROJECT_CONFIG_NAME})`,
+          `[dev-proxy] Project ${resolved}: no config found (tried ${JS_CONFIG_NAMES.join(", ")}, ${PROJECT_CONFIG_NAME}, ${PROJECT_WORKTREES_NAME})`,
         );
       }
     }
@@ -190,6 +198,7 @@ export const __testing = {
   parsePort,
   resolveFilePath,
   loadJson,
+  loadWorktrees,
   loadProjectConfig,
   loadConfig,
   resolveProjectConfigFile,

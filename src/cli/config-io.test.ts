@@ -17,6 +17,7 @@ vi.mock("../proxy/config.js", () => ({
   CONFIG_DIR: "/mock/.dev-proxy",
   GLOBAL_CONFIG_PATH: "/mock/.dev-proxy/config.json",
   PROJECT_CONFIG_NAME: ".dev-proxy.json",
+  PROJECT_WORKTREES_NAME: ".dev-proxy.worktrees.json",
   JS_CONFIG_NAMES: ["dev-proxy.config.mjs", "dev-proxy.config.js"],
   resolveProjectConfigFile: mockResolveProjectConfigFile,
 }));
@@ -306,6 +307,81 @@ describe("writeProjectConfig", () => {
     const written = mockWriteFileSync.mock.calls[0]?.[1] as string;
     const expected = JSON.stringify(cfg, null, 2) + "\n";
     expect(written).toBe(expected);
+  });
+
+  it("writes worktrees to .dev-proxy.worktrees.json only", () => {
+    const cfg = { worktrees: { feat: { port: 4000 } } };
+    writeProjectConfig("/projects/app", cfg);
+
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+    expect(mockWriteFileSync.mock.calls[0]?.[0]).toBe(
+      "/projects/app/.dev-proxy.worktrees.json.tmp",
+    );
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      "/projects/app/.dev-proxy.worktrees.json.tmp",
+      "/projects/app/.dev-proxy.worktrees.json",
+    );
+
+    const written = mockWriteFileSync.mock.calls[0]?.[1] as string;
+    expect(written).toBe(JSON.stringify({ worktrees: cfg.worktrees }, null, 2) + "\n");
+  });
+
+  it("splits worktrees and worktreeConfig into two files", () => {
+    const cfg = {
+      worktrees: { feat: { port: 4000 } },
+      worktreeConfig: {
+        portRange: [4000, 5000] as [number, number],
+        directory: "../{branch}",
+      },
+    };
+    writeProjectConfig("/projects/app", cfg);
+
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(2);
+    const tmpPaths = mockWriteFileSync.mock.calls.map((c) => c[0] as string);
+    expect(tmpPaths).toContain("/projects/app/.dev-proxy.worktrees.json.tmp");
+    expect(tmpPaths).toContain("/projects/app/.dev-proxy.json.tmp");
+  });
+
+  it("does not touch legacy file when only worktrees are written", () => {
+    const cfg = { worktrees: {} };
+    writeProjectConfig("/projects/app", cfg);
+
+    const tmpPaths = mockWriteFileSync.mock.calls.map((c) => c[0] as string);
+    expect(tmpPaths).not.toContain("/projects/app/.dev-proxy.json.tmp");
+  });
+});
+
+describe("readProjectConfig (worktrees split)", () => {
+  beforeEach(() => {
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+  });
+
+  it("prefers .dev-proxy.worktrees.json over legacy worktrees key", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockImplementation((p) => {
+      if (String(p).endsWith(".dev-proxy.worktrees.json")) {
+        return JSON.stringify({ worktrees: { winner: { port: 4000 } } });
+      }
+      return JSON.stringify({
+        routes: { api: "http://localhost:4000" },
+        worktrees: { loser: { port: 9999 } },
+      });
+    });
+
+    const cfg = readProjectConfig("/projects/app");
+    expect(cfg.worktrees).toEqual({ winner: { port: 4000 } });
+    expect(cfg.routes).toEqual({ api: "http://localhost:4000" });
+  });
+
+  it("falls back to legacy worktrees when new file is missing", () => {
+    mockExistsSync.mockImplementation((p) => String(p).endsWith("/.dev-proxy.json"));
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ worktrees: { legacy: { port: 5000 } } }),
+    );
+
+    const cfg = readProjectConfig("/projects/app");
+    expect(cfg.worktrees).toEqual({ legacy: { port: 5000 } });
   });
 });
 

@@ -9,7 +9,7 @@ import type { RawGlobalConfig } from "../cli/config-io.js";
 import {
   CONFIG_DIR,
   GLOBAL_CONFIG_PATH,
-  PROJECT_CONFIG_NAME,
+  PROJECT_WORKTREES_NAME,
   JS_CONFIG_NAMES,
   isValidPort,
   isValidSubdomain,
@@ -338,9 +338,9 @@ function InitWizard() {
       addMessage(`Failed to write ${GLOBAL_CONFIG_PATH}: ${(err as Error).message}`);
     }
 
-    // Project config — JS config for routes, JSON for worktrees
+    // Project config — JS config for routes, dedicated JSON for worktree state
     const jsConfigPath = resolve(absPath, JS_CONFIG_NAMES[0] as string);
-    const jsonConfigPath = resolve(absPath, PROJECT_CONFIG_NAME);
+    const worktreesPath = resolve(absPath, PROJECT_WORKTREES_NAME);
     const routeMap = buildRouteMap(routes, wildcard);
 
     if (!existsSync(jsConfigPath) || overwriteProject) {
@@ -354,13 +354,13 @@ function InitWizard() {
       addMessage(`Skipped ${jsConfigPath}`);
     }
 
-    // Ensure .dev-proxy.json exists for worktrees
-    if (!existsSync(jsonConfigPath)) {
+    // Ensure .dev-proxy.worktrees.json exists for the CLI-managed worktree map
+    if (!existsSync(worktreesPath)) {
       try {
         writeProjectConfig(absPath, { worktrees: {} });
-        addMessage(`Created ${jsonConfigPath}`);
+        addMessage(`Created ${worktreesPath}`);
       } catch (err) {
-        addMessage(`Failed to write ${jsonConfigPath}: ${(err as Error).message}`);
+        addMessage(`Failed to write ${worktreesPath}: ${(err as Error).message}`);
       }
     }
 

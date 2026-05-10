@@ -1,7 +1,12 @@
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { useSyncExternalStore } from "react";
-import { config, PROJECT_CONFIG_NAME, type ProjectConfig } from "./config.js";
+import {
+  config,
+  PROJECT_CONFIG_NAME,
+  PROJECT_WORKTREES_NAME,
+  type ProjectConfig,
+} from "./config.js";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -55,13 +60,23 @@ function readRegistry(): void {
 }
 
 function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEntry> {
-  // Worktrees always live in .dev-proxy.json, even when routes are in a JS config
-  const jsonPath = resolve(project.path, PROJECT_CONFIG_NAME);
+  // Prefer .dev-proxy.worktrees.json; fall back to legacy `worktrees` key in .dev-proxy.json
+  const worktreesPath = resolve(project.path, PROJECT_WORKTREES_NAME);
   try {
-    if (!existsSync(jsonPath)) return project.worktrees;
-    const raw = readFileSync(jsonPath, "utf-8");
-    const data = JSON.parse(raw) as { worktrees?: Record<string, WorktreeEntry> };
-    return data.worktrees ?? {};
+    if (existsSync(worktreesPath)) {
+      const raw = readFileSync(worktreesPath, "utf-8");
+      const data = JSON.parse(raw) as { worktrees?: Record<string, WorktreeEntry> };
+      if (data.worktrees) return data.worktrees;
+    }
+
+    const legacyPath = resolve(project.path, PROJECT_CONFIG_NAME);
+    if (existsSync(legacyPath)) {
+      const raw = readFileSync(legacyPath, "utf-8");
+      const data = JSON.parse(raw) as { worktrees?: Record<string, WorktreeEntry> };
+      return data.worktrees ?? {};
+    }
+
+    return project.worktrees;
   } catch {
     // Config read/parse failed — fall back to cached worktrees
     return project.worktrees;
@@ -71,15 +86,17 @@ function readProjectWorktrees(project: ProjectConfig): Record<string, WorktreeEn
 export function loadRegistry(): void {
   readRegistry();
 
-  // Watch .dev-proxy.json for worktree changes (always JSON, regardless of config type)
+  // Watch both the new worktrees state file and the legacy .dev-proxy.json.
+  // Either can receive worktrees changes: the new file is the canonical
+  // location, and the legacy file is the fallback for projects that haven't
+  // migrated yet. A single directory watcher covers file creation/deletion
+  // too, so a project that flips from legacy → new mid-session is detected.
   for (const project of config.projects) {
-    const jsonPath = resolve(project.path, PROJECT_CONFIG_NAME);
-    if (!existsSync(jsonPath)) continue;
     try {
-      const dir = dirname(jsonPath);
-      const base = basename(jsonPath);
-      const watcher = watch(dir, (_event, filename) => {
-        if (filename !== base) return;
+      const watcher = watch(project.path, (_event, filename) => {
+        if (filename !== PROJECT_WORKTREES_NAME && filename !== PROJECT_CONFIG_NAME) {
+          return;
+        }
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(readRegistry, 100);
       });

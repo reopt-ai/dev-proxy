@@ -25,7 +25,9 @@ function Help() {
       </Text>
       <Text>
         {"  migrate             "}
-        <Text dimColor>Move routes from .dev-proxy.json to dev-proxy.config.mjs</Text>
+        <Text dimColor>
+          Split routes → dev-proxy.config.mjs, worktrees → .dev-proxy.worktrees.json
+        </Text>
       </Text>
       <Text>
         {"  status              "}
