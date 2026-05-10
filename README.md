@@ -123,6 +123,7 @@ Place a `dev-proxy.config.mjs` in each project root registered in `projects`. Ro
 /** @type {import('@reopt-ai/dev-proxy').Config} */
 export default {
   routes: {
+    "@": "http://localhost:3005",
     www: "http://localhost:3001",
     studio: "http://localhost:3001",
     api: "http://localhost:4000",
@@ -131,6 +132,7 @@ export default {
 };
 ```
 
+- `"@"` matches the **apex** (bare) domain — e.g. `reopt.de` itself, with no subdomain. Optional; falls back to `"*"` if absent.
 - `"*"` is a wildcard — unmatched subdomains route here
 - When multiple projects register the same subdomain, the first one wins
 - `certPath`/`keyPath` are set in the global config, resolved relative to `~/.dev-proxy/`

@@ -232,7 +232,8 @@ Format rules:
 
 - Keys are subdomain names (strings)
 - Values are full URLs: `http://localhost:<port>`
-- `"*"` wildcard is optional — only include if the user wants a fallback
+- `"*"` wildcard is optional — only include if the user wants a fallback for unmatched subdomains
+- `"@"` apex key is optional — matches the bare domain (e.g. `reopt.de` itself, no subdomain). Only include if the user wants the apex to route somewhere different from `"*"`. If absent, the apex falls back to `"*"`.
 - Use double quotes for keys and values
 - Include trailing commas
 - JSDoc `@type` annotation enables IDE autocomplete via the exported `Config` type

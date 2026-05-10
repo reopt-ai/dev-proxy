@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import { useRouteSnapshot, PROXY_PORT, HTTPS_PORT } from "../proxy/routes.js";
+import { APEX_KEY, useRouteSnapshot, PROXY_PORT, HTTPS_PORT } from "../proxy/routes.js";
 import { useWorktrees } from "../proxy/worktrees.js";
 import { palette } from "../utils/format.js";
 
@@ -12,9 +12,12 @@ function RouteEntry({
   target: string;
   domain: string;
 }) {
+  // The apex key matches the bare domain \u2014 render it as `domain` rather than
+  // `@.domain`, which would not be a valid host the user types.
+  const host = sub === APEX_KEY ? domain : `${sub}.${domain}`;
   return (
     <Box gap={1}>
-      <Text color={palette.brand}>{`${sub}.${domain}`.padEnd(22)}</Text>
+      <Text color={palette.brand}>{host.padEnd(22)}</Text>
       <Text color={palette.subtle}>{"\u279C"}</Text>
       <Text color={palette.dim}>{target}</Text>
     </Box>

@@ -68,6 +68,7 @@ describe("isValidSubdomain", () => {
     expect(isValidSubdomain("a")).toBe(true);
     expect(isValidSubdomain("a1")).toBe(true);
     expect(isValidSubdomain("*")).toBe(true);
+    expect(isValidSubdomain("@")).toBe(true);
   });
 
   it("rejects invalid subdomains", () => {
