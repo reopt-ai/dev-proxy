@@ -14,6 +14,12 @@
       }
     ],
     ["@semantic-release/npm", { "provenance": true }],
+    [
+      "@semantic-release/exec",
+      {
+        "publishCmd": "echo \"//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}\" > .npmrc-mirror && (npm publish --userconfig=.npmrc-mirror --registry=https://npm.pkg.github.com --access=public || echo '[mirror] GitHub Packages publish failed (non-fatal)') && rm -f .npmrc-mirror"
+      }
+    ],
     "@semantic-release/github"
   ]
 }
