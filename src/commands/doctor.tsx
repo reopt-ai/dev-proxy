@@ -113,7 +113,9 @@ function collectSubdomains(projects: ProjectConfig[]): string[] {
   const subs = new Set<string>();
   for (const project of projects) {
     for (const sub of Object.keys(project.routes)) {
-      if (sub !== "*") {
+      // Skip sentinel keys: "*" matches any subdomain, "@" matches the bare
+      // domain itself. Neither produces a real `<sub>.<domain>` host to look up.
+      if (sub !== "*" && sub !== "@") {
         subs.add(sub);
       }
     }

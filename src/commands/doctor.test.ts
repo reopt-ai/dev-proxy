@@ -113,6 +113,27 @@ describe("collectSubdomains", () => {
     expect(result).not.toContain("*");
   });
 
+  it("excludes apex '@' entries (no <sub>.<domain> host to look up)", () => {
+    const projects: ProjectConfig[] = [
+      {
+        path: "/p1",
+        configPath: "/p1/.dev-proxy.json",
+        configType: "json",
+        routes: {
+          "@": "http://localhost:3500",
+          app: "http://localhost:3000",
+          "*": "http://localhost:9999",
+        },
+        worktrees: {},
+      },
+    ];
+
+    const result = collectSubdomains(projects);
+    expect(result).toEqual(["app"]);
+    expect(result).not.toContain("@");
+    expect(result).not.toContain("*");
+  });
+
   it("deduplicates across projects", () => {
     const projects: ProjectConfig[] = [
       {

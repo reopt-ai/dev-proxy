@@ -57,7 +57,9 @@ export function RouteRow({
   return (
     <Text>
       {"    "}
-      <Text color={sub === "*" ? "yellow" : "cyan"}>{sub.padEnd(pad)}</Text>
+      <Text color={sub === "*" || sub === "@" ? "yellow" : "cyan"}>
+        {sub.padEnd(pad)}
+      </Text>
       <Text dimColor>{"\u279C "}</Text>
       <Text>{target}</Text>
     </Text>
