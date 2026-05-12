@@ -95,7 +95,7 @@ process.stdout.write = ((
   const callback = typeof encodingOrCb === "function" ? encodingOrCb : cb;
   if (callback) callback();
   return true;
-}) as typeof process.stdout.write;
+}) satisfies typeof process.stdout.write;
 
 /** Flush any buffered frame immediately via _raw (bypass setImmediate) */
 function flushBufferedFrame() {
