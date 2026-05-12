@@ -31,7 +31,7 @@ function parseSgrEvent(
 
 export function useMouse(handler: (event: MouseEvent) => void) {
   const { stdout } = useStdout();
-  const { internal_eventEmitter } = useStdin();
+  const { stdin, setRawMode, isRawModeSupported } = useStdin();
   const handlerRef = useRef(handler);
   const bufferRef = useRef("");
 
@@ -40,9 +40,11 @@ export function useMouse(handler: (event: MouseEvent) => void) {
   }, [handler]);
 
   useEffect(() => {
+    if (!isRawModeSupported) return;
+    setRawMode(true);
     stdout.write(ENABLE_MOUSE);
 
-    const onInput = (data: Buffer | string) => {
+    const onData = (data: Buffer | string) => {
       const chunk = typeof data === "string" ? data : data.toString("utf8");
       bufferRef.current += chunk;
 
@@ -72,10 +74,11 @@ export function useMouse(handler: (event: MouseEvent) => void) {
       }
     };
 
-    internal_eventEmitter.on("input", onInput);
+    stdin.on("data", onData);
     return () => {
-      internal_eventEmitter.removeListener("input", onInput);
+      stdin.off("data", onData);
       stdout.write(DISABLE_MOUSE);
+      setRawMode(false);
     };
-  }, [stdout, internal_eventEmitter]);
+  }, [stdin, setRawMode, isRawModeSupported, stdout]);
 }
