@@ -29,6 +29,7 @@ type WorktreeEntry = { ports: Record<string, number> } | { port: number };
 interface RawProjectConfig {
   routes?: Record<string, string>;
   worktrees?: Record<string, WorktreeEntry>;
+  worktreeConfig?: unknown;
 }
 
 /** Raw shape of dev-proxy.config.mjs default export */
@@ -43,6 +44,7 @@ export interface ProjectConfig {
   configType: "js" | "json";
   routes: Record<string, string>;
   worktrees: Record<string, WorktreeEntry>;
+  worktreeConfig?: unknown;
 }
 
 export interface ResolvedConfig {
@@ -126,6 +128,12 @@ function loadWorktrees(projectDir: string): Record<string, WorktreeEntry> {
   return legacyRaw?.worktrees ?? {};
 }
 
+function loadLegacyWorktreeConfig(projectDir: string): unknown {
+  const legacyPath = resolve(projectDir, PROJECT_CONFIG_NAME);
+  const legacyRaw = loadJson(legacyPath) as RawProjectConfig | null;
+  return legacyRaw?.worktreeConfig;
+}
+
 async function loadProjectConfig(projectDir: string): Promise<ProjectConfig | null> {
   const resolution = resolveProjectConfigFile(projectDir);
   if (!resolution) return null;
@@ -140,6 +148,7 @@ async function loadProjectConfig(projectDir: string): Promise<ProjectConfig | nu
       configType: "js",
       routes: jsConfig.routes ?? {},
       worktrees: loadWorktrees(projectDir),
+      worktreeConfig: jsConfig.worktreeConfig ?? loadLegacyWorktreeConfig(projectDir),
     };
   }
 
@@ -152,6 +161,7 @@ async function loadProjectConfig(projectDir: string): Promise<ProjectConfig | nu
     configType: "json",
     routes: raw.routes ?? {},
     worktrees: loadWorktrees(projectDir),
+    worktreeConfig: raw.worktreeConfig,
   };
 }
 
@@ -199,6 +209,7 @@ export const __testing = {
   resolveFilePath,
   loadJson,
   loadWorktrees,
+  loadLegacyWorktreeConfig,
   loadProjectConfig,
   loadConfig,
   resolveProjectConfigFile,

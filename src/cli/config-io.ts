@@ -179,23 +179,41 @@ export function writeProjectConfig(projectPath: string, cfg: RawProjectConfig): 
 
 // ── JS config generation ────────────────────────────────────
 
-export function generateJsConfig(routes: Record<string, string>): string {
+function indentJson(value: unknown, indent: string): string {
+  return JSON.stringify(value, null, 2)
+    .split("\n")
+    .map((line, i) => (i === 0 ? line : indent + line))
+    .join("\n");
+}
+
+export function generateJsConfig(
+  routes: Record<string, string>,
+  worktreeConfig?: WorktreeConfig,
+): string {
   const entries = Object.entries(routes)
     .map(([sub, target]) => `    ${JSON.stringify(sub)}: ${JSON.stringify(target)},`)
     .join("\n");
+
+  const worktreeBlock = worktreeConfig
+    ? `\n  worktreeConfig: ${indentJson(worktreeConfig, "  ")},`
+    : "";
 
   return `/** @type {import('@reopt-ai/dev-proxy').Config} */
 export default {
   routes: {
 ${entries}
-  },
+  },${worktreeBlock}
 };
 `;
 }
 
-export function writeJsConfig(projectPath: string, routes: Record<string, string>): void {
+export function writeJsConfig(
+  projectPath: string,
+  routes: Record<string, string>,
+  worktreeConfig?: WorktreeConfig,
+): void {
   const configPath = resolve(projectPath, JS_CONFIG_NAMES[0] as string);
-  atomicWriteFileSync(configPath, generateJsConfig(routes));
+  atomicWriteFileSync(configPath, generateJsConfig(routes, worktreeConfig));
 }
 
 // ── Validation ───────────────────────────────────────────────

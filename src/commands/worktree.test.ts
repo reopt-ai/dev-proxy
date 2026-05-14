@@ -44,14 +44,25 @@ vi.mock("ink", () => ({
   Text: () => null,
 }));
 
+const projectsList: { path: string; worktreeConfig?: unknown }[] = [];
+
+vi.mock("../proxy/config.js", () => ({
+  config: {
+    get projects() {
+      return projectsList;
+    },
+  },
+}));
+
 const { __testing } = await import("./worktree.js");
-const { findOwningProject, formatPorts } = __testing;
+const { findOwningProject, formatPorts, getWorktreeConfig } = __testing;
 
 // ── Lifecycle ──────────────────────────────────────────────
 
 beforeEach(() => {
   readGlobalConfigMock.mockReset();
   readProjectConfigMock.mockReset();
+  projectsList.length = 0;
 });
 
 afterEach(() => {
@@ -117,5 +128,30 @@ describe("formatPorts", () => {
   it("handles single-service multi-port entry", () => {
     const entry: WorktreeEntry = { ports: { web: 5000 } };
     expect(formatPorts(entry)).toBe("web:5000");
+  });
+});
+
+// ── getWorktreeConfig ──────────────────────────────────────
+
+describe("getWorktreeConfig", () => {
+  it("returns worktreeConfig from the loaded proxy config singleton", () => {
+    projectsList.push({
+      path: "/home/user/project",
+      worktreeConfig: { portRange: [4001, 5000], directory: "../{branch}" },
+    });
+
+    expect(getWorktreeConfig("/home/user/project")).toEqual({
+      portRange: [4001, 5000],
+      directory: "../{branch}",
+    });
+  });
+
+  it("returns undefined when project is not registered", () => {
+    expect(getWorktreeConfig("/home/user/missing")).toBeUndefined();
+  });
+
+  it("returns undefined when registered project has no worktreeConfig", () => {
+    projectsList.push({ path: "/home/user/project" });
+    expect(getWorktreeConfig("/home/user/project")).toBeUndefined();
   });
 });

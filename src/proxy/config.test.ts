@@ -365,6 +365,90 @@ describe("loadProjectConfig (JS config path)", () => {
       realFs.rmSync(tmpDir, { recursive: true });
     }
   });
+
+  it("loads worktreeConfig from JS config when present", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const jsPath = join(tmpDir, "dev-proxy.config.js");
+    realFs.writeFileSync(
+      jsPath,
+      `export default {
+        routes: { app: "http://localhost:3000" },
+        worktreeConfig: { portRange: [4001, 5000], directory: "../app-{branch}" },
+      };\n`,
+    );
+
+    fsMock.existsSync.mockImplementation((p: string) => p === jsPath);
+
+    try {
+      const result = await loadProjectConfig(tmpDir);
+      expect(result?.worktreeConfig).toEqual({
+        portRange: [4001, 5000],
+        directory: "../app-{branch}",
+      });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("falls back to legacy .dev-proxy.json worktreeConfig when JS config has none", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const jsPath = join(tmpDir, "dev-proxy.config.js");
+    const legacyPath = join(tmpDir, ".dev-proxy.json");
+    realFs.writeFileSync(jsPath, "export default { routes: {} };\n");
+
+    fsMock.existsSync.mockImplementation((p: string) => p === jsPath || p === legacyPath);
+    fsMock.readFileSync.mockImplementation((p: string) => {
+      if (p === legacyPath) {
+        return JSON.stringify({
+          worktreeConfig: { portRange: [4001, 5000], directory: "../legacy-{branch}" },
+        });
+      }
+      return "";
+    });
+
+    try {
+      const result = await loadProjectConfig(tmpDir);
+      expect(result?.worktreeConfig).toEqual({
+        portRange: [4001, 5000],
+        directory: "../legacy-{branch}",
+      });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("prefers JS config worktreeConfig over legacy .dev-proxy.json", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const jsPath = join(tmpDir, "dev-proxy.config.js");
+    const legacyPath = join(tmpDir, ".dev-proxy.json");
+    realFs.writeFileSync(
+      jsPath,
+      `export default {
+        routes: {},
+        worktreeConfig: { portRange: [6000, 7000], directory: "../mjs-{branch}" },
+      };\n`,
+    );
+
+    fsMock.existsSync.mockImplementation((p: string) => p === jsPath || p === legacyPath);
+    fsMock.readFileSync.mockImplementation((p: string) => {
+      if (p === legacyPath) {
+        return JSON.stringify({
+          worktreeConfig: { portRange: [1000, 2000], directory: "../legacy-{branch}" },
+        });
+      }
+      return "";
+    });
+
+    try {
+      const result = await loadProjectConfig(tmpDir);
+      expect(result?.worktreeConfig).toEqual({
+        portRange: [6000, 7000],
+        directory: "../mjs-{branch}",
+      });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
 });
 
 // ── loadConfig ─────────────────────────────────────────────
