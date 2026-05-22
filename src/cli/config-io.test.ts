@@ -415,6 +415,36 @@ describe("generateJsConfig", () => {
     // Should not have any route entries between the braces
     expect(output).toMatch(/routes: \{\n\s*\}/);
   });
+
+  it("omits worktreeConfig block when not provided", () => {
+    const output = generateJsConfig({ api: "http://localhost:4000" });
+    expect(output).not.toContain("worktreeConfig");
+  });
+
+  it("emits worktreeConfig block when provided", () => {
+    const output = generateJsConfig(
+      { api: "http://localhost:4000" },
+      { portRange: [4001, 5000], directory: "../app-{branch}" },
+    );
+    expect(output).toContain("worktreeConfig:");
+    expect(output).toContain('"portRange"');
+    expect(output).toContain('"directory": "../app-{branch}"');
+  });
+
+  it("emits worktreeConfig with services and hooks", () => {
+    const output = generateJsConfig(
+      {},
+      {
+        portRange: [4001, 5000],
+        directory: "../{branch}",
+        services: { web: { env: "PORT" }, api: { env: "API_PORT" } },
+        hooks: { "post-create": "pnpm install" },
+      },
+    );
+    expect(output).toContain('"services"');
+    expect(output).toContain('"env": "PORT"');
+    expect(output).toContain('"post-create": "pnpm install"');
+  });
 });
 
 // ── writeJsConfig ───────────────────────────────────────────
