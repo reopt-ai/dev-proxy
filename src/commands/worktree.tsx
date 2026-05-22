@@ -12,6 +12,7 @@ import {
   getEntryPorts,
   generateEnvContent,
   type WorktreeEntry,
+  type WorktreeConfig,
 } from "../cli/config-io.js";
 import {
   Header,
@@ -20,6 +21,7 @@ import {
   ErrorMessage,
   ExitOnRender,
 } from "../cli/output.js";
+import { config } from "../proxy/config.js";
 
 function findOwningProject(cwd: string): string | null {
   const cfg = readGlobalConfig();
@@ -30,6 +32,16 @@ function findOwningProject(cwd: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Look up worktreeConfig from the loaded proxy config singleton, which already
+ * merges dev-proxy.config.mjs (preferred) with .dev-proxy.json (legacy fallback).
+ * CLI invocations are short-lived, so the singleton is always fresh.
+ */
+function getWorktreeConfig(projectPath: string): WorktreeConfig | undefined {
+  const project = config.projects.find((p) => p.path === projectPath);
+  return project?.worktreeConfig as WorktreeConfig | undefined;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -178,15 +190,15 @@ function WorktreeCreate({ branch }: { branch: string }) {
   }
 
   const cfg = readProjectConfig(projectPath);
-  const wtConfig = cfg.worktreeConfig;
+  const wtConfig = getWorktreeConfig(projectPath);
 
   if (!wtConfig) {
     return (
       <Box flexDirection="column">
         <ExitOnRender />
         <ErrorMessage
-          message="worktreeConfig not configured in .dev-proxy.json"
-          hint='Add "worktreeConfig": { "portRange": [4001, 5000], "directory": "../project-{branch}" }'
+          message="worktreeConfig not configured in dev-proxy.config.mjs"
+          hint="Add `worktreeConfig: { portRange: [4001, 5000], directory: '../project-{branch}' }` to the default export"
         />
       </Box>
     );
@@ -363,7 +375,7 @@ function WorktreeDestroy({ branch }: { branch: string }) {
     );
   }
 
-  const wtConfig = cfg.worktreeConfig;
+  const wtConfig = getWorktreeConfig(projectPath);
   const messages: string[] = [];
   const warnings: string[] = [];
 
@@ -494,4 +506,4 @@ if (subcommand === "create") {
   render(<WorktreeList />);
 }
 
-export const __testing = { findOwningProject, formatPorts };
+export const __testing = { findOwningProject, formatPorts, getWorktreeConfig };

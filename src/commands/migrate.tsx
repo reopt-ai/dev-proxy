@@ -10,13 +10,14 @@ import {
   resolveProjectConfigFile,
 } from "../cli/config-io.js";
 import { Header, SuccessMessage, ErrorMessage, ExitOnRender } from "../cli/output.js";
+import { config } from "../proxy/config.js";
 
 interface MigrateResult {
   path: string;
   status:
     | "migrated"
-    | "split-worktrees"
-    | "skipped-js-exists"
+    | "cleaned-legacy"
+    | "skipped-no-legacy"
     | "skipped-no-json"
     | "skipped-no-routes";
 }
@@ -26,23 +27,35 @@ function migrateProject(projectPath: string): MigrateResult {
   const legacyPath = resolve(projectPath, PROJECT_CONFIG_NAME);
 
   if (resolution?.type === "js") {
-    // Already on JS config — only thing left to do is split out worktrees
-    // from the legacy file (if any) into the dedicated worktrees file.
+    // mjs is already the active config. Move any leftovers from
+    // .dev-proxy.json (worktrees / worktreeConfig) into their proper homes,
+    // then delete the legacy file.
     if (!existsSync(legacyPath)) {
-      return { path: projectPath, status: "skipped-js-exists" };
+      return { path: projectPath, status: "skipped-no-legacy" };
     }
+
     const cfg = readProjectConfig(projectPath);
     const hasWorktrees = cfg.worktrees && Object.keys(cfg.worktrees).length > 0;
+    const hasLegacyWtConfig = cfg.worktreeConfig !== undefined;
 
-    if (!hasWorktrees) {
-      // Either nothing to migrate, or already split. cleanupLegacyFile is a
-      // no-op when worktreeConfig is present.
-      return { path: projectPath, status: "skipped-js-exists" };
+    if (!hasWorktrees && !hasLegacyWtConfig) {
+      cleanupLegacyFile(legacyPath);
+      return { path: projectPath, status: "cleaned-legacy" };
     }
 
-    writeProjectConfig(projectPath, { worktrees: cfg.worktrees ?? {} });
-    cleanupLegacyFile(legacyPath, cfg.worktreeConfig);
-    return { path: projectPath, status: "split-worktrees" };
+    if (hasWorktrees) {
+      writeProjectConfig(projectPath, { worktrees: cfg.worktrees ?? {} });
+    }
+
+    if (hasLegacyWtConfig) {
+      // Preserve existing mjs routes (loaded via the proxy config singleton)
+      const project = config.projects.find((p) => p.path === projectPath);
+      const routes = project?.routes ?? {};
+      writeJsConfig(projectPath, routes, cfg.worktreeConfig);
+    }
+
+    cleanupLegacyFile(legacyPath);
+    return { path: projectPath, status: "cleaned-legacy" };
   }
 
   if (!existsSync(legacyPath)) {
@@ -56,27 +69,21 @@ function migrateProject(projectPath: string): MigrateResult {
     return { path: projectPath, status: "skipped-no-routes" };
   }
 
-  writeJsConfig(projectPath, routes);
+  // Routes + worktreeConfig → dev-proxy.config.mjs
+  writeJsConfig(projectPath, routes, cfg.worktreeConfig);
 
-  // Persist worktrees to the new file and worktreeConfig (if any) back to
-  // the legacy file. writeProjectConfig handles the split automatically.
-  const splitCfg: {
-    worktrees: NonNullable<typeof cfg.worktrees>;
-    worktreeConfig?: typeof cfg.worktreeConfig;
-  } = {
-    worktrees: cfg.worktrees ?? {},
-  };
-  if (cfg.worktreeConfig) splitCfg.worktreeConfig = cfg.worktreeConfig;
-  writeProjectConfig(projectPath, splitCfg);
+  // Worktrees → .dev-proxy.worktrees.json
+  if (cfg.worktrees && Object.keys(cfg.worktrees).length > 0) {
+    writeProjectConfig(projectPath, { worktrees: cfg.worktrees });
+  }
 
-  // If the legacy file would now hold nothing (no worktreeConfig), delete it.
-  cleanupLegacyFile(legacyPath, cfg.worktreeConfig);
+  // .dev-proxy.json no longer holds anything — delete it.
+  cleanupLegacyFile(legacyPath);
 
   return { path: projectPath, status: "migrated" };
 }
 
-function cleanupLegacyFile(legacyPath: string, worktreeConfig: unknown): void {
-  if (worktreeConfig) return;
+function cleanupLegacyFile(legacyPath: string): void {
   if (!existsSync(legacyPath)) return;
   try {
     unlinkSync(legacyPath);
@@ -104,10 +111,10 @@ function Migrate() {
 
   const results = projects.map(migrateProject);
   const migrated = results.filter(
-    (r) => r.status === "migrated" || r.status === "split-worktrees",
+    (r) => r.status === "migrated" || r.status === "cleaned-legacy",
   );
   const skipped = results.filter(
-    (r) => r.status !== "migrated" && r.status !== "split-worktrees",
+    (r) => r.status !== "migrated" && r.status !== "cleaned-legacy",
   );
 
   return (
@@ -119,8 +126,8 @@ function Migrate() {
         <SuccessMessage
           key={r.path}
           message={
-            r.status === "split-worktrees"
-              ? `Split worktrees: ${r.path}`
+            r.status === "cleaned-legacy"
+              ? `Cleaned legacy file: ${r.path}`
               : `Migrated: ${r.path}`
           }
         />
@@ -129,7 +136,7 @@ function Migrate() {
       {skipped.map((r) => (
         <Text key={r.path} dimColor>
           {"    "}
-          {r.status === "skipped-js-exists" && `Skipped (already migrated): ${r.path}`}
+          {r.status === "skipped-no-legacy" && `Skipped (already on mjs): ${r.path}`}
           {r.status === "skipped-no-json" && `Skipped (no config files): ${r.path}`}
           {r.status === "skipped-no-routes" &&
             `Skipped (no routes to migrate): ${r.path}`}
@@ -139,7 +146,9 @@ function Migrate() {
       {migrated.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>
-            {"    Routes → dev-proxy.config.mjs, worktrees → .dev-proxy.worktrees.json"}
+            {
+              "    Routes + worktreeConfig → dev-proxy.config.mjs, worktrees → .dev-proxy.worktrees.json"
+            }
           </Text>
         </Box>
       )}
