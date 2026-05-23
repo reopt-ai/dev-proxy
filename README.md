@@ -43,7 +43,7 @@ dev-proxy is:
 - Upstream `http`/`https` and `ws`/`wss` target support
 - Git worktree-based dynamic routing via project config
 - Auto-generated TLS certificates via [mkcert](https://github.com/FiloSottile/mkcert)
-- Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`dev-proxy.config.mjs` for routes, `.dev-proxy.json` for `worktreeConfig`, `.dev-proxy.worktrees.json` for the CLI-managed worktree map)
+- Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`dev-proxy.config.mjs` for routes + `worktreeConfig`, `.dev-proxy.worktrees.json` for the CLI-managed worktree map). Legacy `.dev-proxy.json` is read as a fallback.
 
 ## Prerequisites
 
@@ -95,14 +95,15 @@ cd dev-proxy && pnpm install && pnpm proxy
 
 ## Configuration
 
-Config is split into four files:
+Config lives in three files for new setups:
 
 1. **`~/.dev-proxy/config.json`** — Global settings (domain, ports, TLS, project list)
-2. **`<project>/dev-proxy.config.mjs`** — Per-project routes (canonical format)
-3. **`<project>/.dev-proxy.json`** — Per-project `worktreeConfig` (only required if you use git worktree routing). Hand-edited.
-4. **`<project>/.dev-proxy.worktrees.json`** — CLI-managed worktree instance map (`dev-proxy init` writes an empty placeholder; the worktree CLI commands keep it in sync — do not edit by hand)
+2. **`<project>/dev-proxy.config.mjs`** — Per-project routes + (optional) `worktreeConfig`. Hand-edited.
+3. **`<project>/.dev-proxy.worktrees.json`** — CLI-managed worktree instance map (`dev-proxy init` writes an empty `{ "worktrees": {} }` placeholder; the worktree CLI commands keep it in sync — do not hand-edit)
 
 > Easiest path: run `dev-proxy init` from your project directory and the wizard creates these files for you. The sections below cover the file format if you'd rather author them by hand.
+
+> **Legacy `<project>/.dev-proxy.json`** is a read-only fallback for older projects (pre-mjs layouts). Run `dev-proxy migrate` once and it goes away.
 
 ### Global Config (`~/.dev-proxy/config.json`)
 
@@ -137,18 +138,18 @@ export default {
 - When multiple projects register the same subdomain, the first one wins
 - `certPath`/`keyPath` are set in the global config, resolved relative to `~/.dev-proxy/`
 - `dev-proxy.config.js` is also accepted (used when `package.json` has `"type": "module"`); `.mjs` takes precedence if both exist
-- Resolution order at runtime: `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (legacy fallback for `routes`)
-- The CLI-managed `worktrees` map always lives in `.dev-proxy.worktrees.json`. `worktreeConfig` (if present) stays in `.dev-proxy.json` and is hand-edited.
+- Resolution order at runtime: `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (legacy fallback for both `routes` and `worktreeConfig`)
+- The CLI-managed `worktrees` instance map always lives in `.dev-proxy.worktrees.json`. `worktreeConfig` (if present) belongs in the same `dev-proxy.config.mjs` default export as `routes` — see [Worktree Routing](#worktree-routing).
 
 ### Migrating from `.dev-proxy.json`
 
-Earlier versions stored everything (routes, `worktreeConfig`, and the `worktrees` instance map) in `.dev-proxy.json`. The format still works at read time, but `dev-proxy.config.mjs` + `.dev-proxy.worktrees.json` is the documented split. To migrate every registered project at once:
+Earlier versions stored everything (routes, `worktreeConfig`, and the `worktrees` instance map) in `.dev-proxy.json`. The format still works at read time as a fallback, but new setups use `dev-proxy.config.mjs` (routes + `worktreeConfig`) + `.dev-proxy.worktrees.json` (CLI-managed instance map). To consolidate every registered project at once:
 
 ```bash
 dev-proxy migrate
 ```
 
-The command moves `routes` from `.dev-proxy.json` into `dev-proxy.config.mjs`, moves the `worktrees` instance map into `.dev-proxy.worktrees.json`, and leaves `worktreeConfig` (if any) in `.dev-proxy.json`. When `.dev-proxy.json` would otherwise be empty after the split, it is removed. The command is idempotent and projects already migrated are skipped.
+The command moves `routes` and `worktreeConfig` into `dev-proxy.config.mjs`, moves the `worktrees` instance map into `.dev-proxy.worktrees.json`, and deletes `.dev-proxy.json` once it is empty. It is idempotent — projects already migrated are skipped.
 
 ### HTTPS
 
@@ -167,7 +168,7 @@ dev-proxy supports git worktree-based dynamic routing. When you use `branch--app
 
 **Automatic lifecycle management:**
 
-Routes go in `dev-proxy.config.mjs`; the `worktreeConfig` schema goes in `.dev-proxy.json` (you author this); the live `worktrees` instance map goes in `.dev-proxy.worktrees.json` (the CLI manages this). Use `services` to define per-subdomain port mappings — dev-proxy allocates ports automatically and generates a `.env.local` file so your dev servers know which port to listen on:
+Routes **and** `worktreeConfig` go in the same `dev-proxy.config.mjs` default export (you author this); the live `worktrees` instance map goes in `.dev-proxy.worktrees.json` (the CLI manages this). Use `services` to define per-subdomain port mappings — dev-proxy allocates ports automatically and generates a `.env.local` file so your dev servers know which port to listen on:
 
 ```js
 // dev-proxy.config.mjs
@@ -178,26 +179,20 @@ export default {
     data: "http://localhost:4001",
     "*": "http://localhost:3001",
   },
-};
-```
-
-```json
-// .dev-proxy.json
-{
-  "worktreeConfig": {
-    "portRange": [4101, 5000],
-    "directory": "../myproject-{branch}",
-    "services": {
-      "www": { "env": "PORT" },
-      "data": { "env": "DATA_PORT" }
+  worktreeConfig: {
+    portRange: [4101, 5000],
+    directory: "../myproject-{branch}",
+    services: {
+      www: { env: "PORT" },
+      data: { env: "DATA_PORT" },
     },
-    "envFile": ".env.local",
-    "hooks": {
+    envFile: ".env.local",
+    hooks: {
       "post-create": "pnpm install",
-      "post-remove": "echo cleanup done"
-    }
-  }
-}
+      "post-remove": "echo cleanup done",
+    },
+  },
+};
 ```
 
 ```json
@@ -320,8 +315,8 @@ Kill the existing process or use a different port in your config:
 # Find and kill
 lsof -ti :3000 | xargs kill
 
-# Or change port
-# Or change port in ~/.dev-proxy/config.json: "port": 3080
+# Or change the proxy port in ~/.dev-proxy/config.json
+# ("port": 3080)
 ```
 
 ### mkcert not found
@@ -364,25 +359,25 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 
 ## CLI Reference
 
-| Command                                | Description                                                              |
-| -------------------------------------- | ------------------------------------------------------------------------ |
-| `dev-proxy`                            | Start proxy and open traffic inspector                                   |
-| `dev-proxy init`                       | Interactive setup wizard                                                 |
-| `dev-proxy migrate`                    | Split legacy `.dev-proxy.json` into `.mjs` + `.dev-proxy.worktrees.json` |
-| `dev-proxy status`                     | Show configuration and routing table                                     |
-| `dev-proxy doctor`                     | Run environment diagnostics                                              |
-| `dev-proxy config`                     | View global settings                                                     |
-| `dev-proxy config set <key> <value>`   | Modify global settings (domain, port, httpsPort)                         |
-| `dev-proxy project add [path]`         | Register a project (default: cwd)                                        |
-| `dev-proxy project remove <path>`      | Unregister a project                                                     |
-| `dev-proxy project list`               | List registered projects                                                 |
-| `dev-proxy worktree create <branch>`   | Create worktree with auto port + hooks                                   |
-| `dev-proxy worktree destroy <branch>`  | Destroy worktree with hooks + cleanup                                    |
-| `dev-proxy worktree add <name> <port>` | Register worktree manually (no git operations)                           |
-| `dev-proxy worktree remove <name>`     | Unregister worktree manually                                             |
-| `dev-proxy worktree list`              | List all worktrees                                                       |
-| `dev-proxy --help`                     | Show help                                                                |
-| `dev-proxy --version`                  | Show version                                                             |
+| Command                                | Description                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `dev-proxy`                            | Start proxy and open traffic inspector                                                          |
+| `dev-proxy init`                       | Interactive setup wizard                                                                        |
+| `dev-proxy migrate`                    | Move legacy `.dev-proxy.json` content into `.mjs` + `.dev-proxy.worktrees.json`, then delete it |
+| `dev-proxy status`                     | Show configuration and routing table                                                            |
+| `dev-proxy doctor`                     | Run environment diagnostics                                                                     |
+| `dev-proxy config`                     | View global settings                                                                            |
+| `dev-proxy config set <key> <value>`   | Modify global settings (domain, port, httpsPort)                                                |
+| `dev-proxy project add [path]`         | Register a project (default: cwd)                                                               |
+| `dev-proxy project remove <path>`      | Unregister a project                                                                            |
+| `dev-proxy project list`               | List registered projects                                                                        |
+| `dev-proxy worktree create <branch>`   | Create worktree with auto port + hooks                                                          |
+| `dev-proxy worktree destroy <branch>`  | Destroy worktree with hooks + cleanup                                                           |
+| `dev-proxy worktree add <name> <port>` | Register worktree manually (no git operations)                                                  |
+| `dev-proxy worktree remove <name>`     | Unregister worktree manually                                                                    |
+| `dev-proxy worktree list`              | List all worktrees                                                                              |
+| `dev-proxy --help`                     | Show help                                                                                       |
+| `dev-proxy --version`                  | Show version                                                                                    |
 
 ## Architecture
 

@@ -39,7 +39,7 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 
 **Proxy flow**: `createProxyServer()` → emitter fires `request` / `request:complete` / `request:error` / `ws` → store receives via `pushHttp`/`pushWs` → React renders via snapshot.
 
-**Config**: `~/.dev-proxy/config.json` (global: domain, ports, TLS, `projects` array) → each project's `dev-proxy.config.mjs` (routes + `worktreeConfig`) plus `.dev-proxy.worktrees.json` (CLI-managed worktree instance map). Legacy `.dev-proxy.json` (pre-`migrate`) is still read with the new file taking precedence. No cwd-based search — projects are explicitly registered.
+**Config**: `~/.dev-proxy/config.json` (global: domain, ports, TLS, `projects` array) → each project's `dev-proxy.config.mjs` (routes + `worktreeConfig`) plus `.dev-proxy.worktrees.json` (CLI-managed worktree instance map). Legacy `.dev-proxy.json` (pre-`migrate`) is still read as a fallback for both `routes` and `worktreeConfig` — the mjs file wins when both define the same key, and `dev-proxy migrate` deletes the legacy file once everything has moved. No cwd-based search — projects are explicitly registered.
 
 **Routing**: `host.split(".")[0]` extracts subdomain → exact match in merged routes → `"*"` wildcard fallback → `null` (502). Worktree syntax: `branch--app.domain` → lookup in project worktrees → unregistered = offline error page (no silent fallback).
 
