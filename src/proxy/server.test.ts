@@ -105,6 +105,47 @@ describe("escapeHtml", () => {
       "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;",
     );
   });
+
+  it("escapes single quotes", () => {
+    expect(escapeHtml("it's a 'test'")).toBe("it&#39;s a &#39;test&#39;");
+  });
+});
+
+describe("stripHopByHopHeaders", () => {
+  const { stripHopByHopHeaders } = __testing;
+
+  it("removes standard hop-by-hop headers", () => {
+    const headers = {
+      host: "example.com",
+      connection: "keep-alive",
+      "keep-alive": "timeout=5",
+      "transfer-encoding": "chunked",
+      upgrade: "h2c",
+      te: "trailers",
+      "content-type": "application/json",
+    };
+    stripHopByHopHeaders(headers);
+    expect(headers).toEqual({
+      host: "example.com",
+      "content-type": "application/json",
+    });
+  });
+
+  it("removes headers named in the Connection header", () => {
+    const headers = {
+      connection: "x-custom, close",
+      "x-custom": "value",
+      "x-keep": "keep",
+    };
+    stripHopByHopHeaders(headers);
+    expect(headers).toEqual({ "x-keep": "keep" });
+  });
+
+  it("leaves a header object without hop-by-hop entries untouched", () => {
+    const headers = { host: "example.com", accept: "*/*" };
+    stripHopByHopHeaders(headers);
+    expect(headers).toEqual({ host: "example.com", accept: "*/*" });
+  });
 });
 
 describe("parseCookies", () => {
