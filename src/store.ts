@@ -185,6 +185,9 @@ function evictExcess() {
     }
   }
   events.length = writeIdx;
+  // The events array was compacted in place — invalidate the filtered cache
+  // explicitly rather than relying on the caller's revision-bump ordering.
+  cachedFiltered = null;
 }
 
 function shellQuote(value: string): string {
@@ -195,7 +198,10 @@ export function pushHttp(event: ProxyRequestEvent) {
   eventsRevision++;
   let slim: SlimRequestEvent;
   let detail: RequestDetail | null;
-  if (detailActive) {
+  // Collect detail when active, OR when this id already has a detail entry —
+  // otherwise a request that started while active loses its response headers
+  // when its `request:complete` arrives after the idle timeout.
+  if (detailActive || detailMap.has(event.id)) {
     const split = splitEvent(event);
     slim = split.slim;
     detail = split.detail;
