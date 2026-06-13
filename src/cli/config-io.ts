@@ -98,8 +98,10 @@ export function getEntryPorts(entry: WorktreeEntry): number[] {
 /** Get port for a specific service, with legacy fallback */
 export function getServicePort(entry: WorktreeEntry, service?: string): number | null {
   if ("ports" in entry) {
-    if (service && service in entry.ports) return entry.ports[service] ?? null;
-    // Fallback: first port
+    // A named service that isn't registered returns null rather than
+    // silently misrouting to another service's port. Only fall back to the
+    // first port when no service is requested.
+    if (service) return entry.ports[service] ?? null;
     const values = Object.values(entry.ports);
     return values[0] ?? null;
   }
