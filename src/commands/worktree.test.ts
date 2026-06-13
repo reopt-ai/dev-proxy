@@ -31,6 +31,7 @@ vi.mock("../cli/output.js", () => ({
 
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -107,6 +108,24 @@ describe("findOwningProject", () => {
     // because it only matches exact path or sub-path with "/"
     expect(findOwningProject("/home/projectX")).toBeNull();
     expect(findOwningProject("/home/projectX/src")).toBeNull();
+  });
+
+  it("prefers the longest (most specific) matching prefix for nested projects", () => {
+    readGlobalConfigMock.mockReturnValue({
+      projects: ["/home/user/mono", "/home/user/mono/packages/app"],
+    });
+
+    expect(findOwningProject("/home/user/mono/packages/app/src")).toBe(
+      "/home/user/mono/packages/app",
+    );
+  });
+
+  it("normalizes trailing slashes and '..' segments before matching", () => {
+    readGlobalConfigMock.mockReturnValue({
+      projects: ["/home/user/project/"],
+    });
+
+    expect(findOwningProject("/home/user/project/sub/..")).toBe("/home/user/project/");
   });
 });
 

@@ -39,8 +39,11 @@ type Step =
 // ── Validators ──────────────────────────────────────────────
 
 function validatePort(value: string): string | null {
-  const num = parseInt(value, 10);
-  if (!isValidPort(num)) return `Invalid port "${value}" — must be 1-65535`;
+  // Number() rejects trailing garbage ("4000abc" → NaN); parseInt would not.
+  const num = Number(value.trim());
+  if (!value.trim() || !isValidPort(num)) {
+    return `Invalid port "${value}" — must be 1-65535`;
+  }
   return null;
 }
 
@@ -78,8 +81,8 @@ function parseRouteInput(value: string, existing: Route[]): ParseRouteResult {
   }
 
   const portStr = trimmed.slice(eq + 1).trim();
-  const portNum = parseInt(portStr, 10);
-  if (!isValidPort(portNum)) {
+  const portNum = Number(portStr);
+  if (!portStr || !isValidPort(portNum)) {
     return { ok: false, error: `Invalid port "${portStr}" — must be 1-65535` };
   }
 

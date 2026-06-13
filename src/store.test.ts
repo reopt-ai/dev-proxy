@@ -196,6 +196,47 @@ describe("dev-proxy store", () => {
     expect(getSelectedDetail()).not.toBeNull();
   });
 
+  it("merges response detail collected idle when the request started while active", () => {
+    setInspectActive(true);
+
+    // Request starts while active — request detail is captured.
+    pushHttp(
+      makeHttpEvent({
+        id: "req-1",
+        url: "/slow",
+        requestHeaders: { host: "www.example.dev:3000", "x-trace": "abc" },
+        responseHeaders: {},
+      }),
+    );
+    expect(getSelectedDetail()?.requestHeaders).toMatchObject({ "x-trace": "abc" });
+
+    // Detail collection goes idle before the response arrives.
+    setInspectActive(false);
+
+    // request:complete arrives while idle — the existing detail entry must be
+    // updated with the response headers rather than dropped.
+    pushHttp(
+      makeHttpEvent({
+        id: "req-1",
+        url: "/slow",
+        statusCode: 200,
+        requestHeaders: { host: "www.example.dev:3000", "x-trace": "abc" },
+        responseHeaders: { "content-type": "application/json" },
+      }),
+    );
+
+    const detail = getSelectedDetail();
+    expect(detail).not.toBeNull();
+    expect(detail?.responseHeaders).toMatchObject({ "content-type": "application/json" });
+  });
+
+  it("does not start collecting detail for a brand-new request while idle", () => {
+    setInspectActive(false);
+    pushHttp(makeHttpEvent({ id: "req-idle", url: "/idle" }));
+    expect(getSelected()?.id).toBe("req-idle");
+    expect(getSelectedDetail()).toBeNull();
+  });
+
   it("tracks active websocket count without truncating long-running sessions", () => {
     for (let i = 0; i < 35; i++) {
       pushWs(makeWsEvent({ id: `ws-${i}`, status: "open", url: `/socket/${i}` }));

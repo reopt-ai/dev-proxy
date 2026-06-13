@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Box, Text, render } from "ink";
@@ -26,12 +26,20 @@ import { config } from "../proxy/config.js";
 function findOwningProject(cwd: string): string | null {
   const cfg = readGlobalConfig();
   const projects = cfg.projects ?? [];
+  const normalizedCwd = resolve(cwd);
+  // Normalize both sides (trailing slashes, `..`, symlink-free relative parts)
+  // and prefer the longest matching prefix so a nested project wins over its
+  // parent when both are registered.
+  let best: string | null = null;
   for (const p of projects) {
-    if (cwd === p || cwd.startsWith(p + "/")) {
-      return p;
+    const normalized = resolve(p);
+    if (normalizedCwd === normalized || normalizedCwd.startsWith(normalized + "/")) {
+      if (best === null || normalized.length > resolve(best).length) {
+        best = p;
+      }
     }
   }
-  return null;
+  return best;
 }
 
 /**
@@ -114,9 +122,10 @@ function WorktreeAdd({ name, port }: { name: string; port: number }) {
   }
 
   const cfg = readProjectConfig(projectPath);
-  cfg.worktrees = cfg.worktrees ?? {};
-  cfg.worktrees[name] = { port };
-  writeProjectConfig(projectPath, cfg);
+  const worktrees = { ...(cfg.worktrees ?? {}), [name]: { port } };
+  // Write only the worktrees file — passing the full merged cfg would
+  // resurrect a legacy .dev-proxy.json from routes/worktreeConfig read from it.
+  writeProjectConfig(projectPath, { worktrees });
 
   return (
     <Box flexDirection="column">
@@ -160,8 +169,7 @@ function WorktreeRemove({ name }: { name: string }) {
   }
 
   const { [name]: _, ...remaining } = worktrees;
-  cfg.worktrees = remaining;
-  writeProjectConfig(projectPath, cfg);
+  writeProjectConfig(projectPath, { worktrees: remaining });
 
   return (
     <Box flexDirection="column">
@@ -263,9 +271,10 @@ function WorktreeCreate({ branch }: { branch: string }) {
   const messages: string[] = [];
   const warnings: string[] = [];
 
-  // git worktree add
+  // git worktree add — execFileSync avoids the shell entirely, so the branch
+  // name can never be interpreted as shell syntax regardless of validation.
   try {
-    execSync(`git worktree add ${JSON.stringify(worktreeDir)} ${branch}`, {
+    execFileSync("git", ["worktree", "add", worktreeDir, branch], {
       cwd: projectPath,
       stdio: "pipe",
     });
@@ -282,12 +291,26 @@ function WorktreeCreate({ branch }: { branch: string }) {
     );
   }
 
-  // Update config
-  cfg.worktrees = { ...worktrees, [branch]: worktreeEntry };
-  try {
-    writeProjectConfig(projectPath, cfg);
-  } catch (err) {
-    warnings.push(`Failed to update config: ${(err as Error).message}`);
+  // Re-read worktrees immediately before writing to narrow the TOCTOU window
+  // against a concurrent `worktree create`. Detect collisions on either the
+  // branch or any allocated port, and rebuild on the freshest state.
+  const fresh = readProjectConfig(projectPath).worktrees ?? {};
+  const freshUsedPorts = new Set(Object.values(fresh).flatMap((w) => getEntryPorts(w)));
+  const collidingPort = getEntryPorts(worktreeEntry).find((p) => freshUsedPorts.has(p));
+  if (branch in fresh) {
+    warnings.push(`Config entry for "${branch}" already added by another process`);
+  } else if (collidingPort !== undefined) {
+    warnings.push(
+      `Port ${collidingPort} was taken by another process — config not updated`,
+    );
+  } else {
+    try {
+      writeProjectConfig(projectPath, {
+        worktrees: { ...fresh, [branch]: worktreeEntry },
+      });
+    } catch (err) {
+      warnings.push(`Failed to update config: ${(err as Error).message}`);
+    }
   }
 
   if (portsMap) {
@@ -396,9 +419,9 @@ function WorktreeDestroy({ branch }: { branch: string }) {
     }
   }
 
-  // git worktree remove
+  // git worktree remove — execFileSync avoids the shell (no injection via dir)
   try {
-    execSync(`git worktree remove ${JSON.stringify(worktreeDir)} --force`, {
+    execFileSync("git", ["worktree", "remove", worktreeDir, "--force"], {
       cwd: projectPath,
       stdio: "pipe",
     });
@@ -407,12 +430,12 @@ function WorktreeDestroy({ branch }: { branch: string }) {
     warnings.push(`git worktree remove failed (config entry still removed)`);
   }
 
-  // Update config
+  // Update config — write only the worktrees file (re-read for freshness)
   const removed = worktrees[branch] as WorktreeEntry;
-  const { [branch]: _, ...remaining } = worktrees;
-  cfg.worktrees = remaining;
+  const fresh = readProjectConfig(projectPath).worktrees ?? worktrees;
+  const { [branch]: _, ...remaining } = fresh;
   try {
-    writeProjectConfig(projectPath, cfg);
+    writeProjectConfig(projectPath, { worktrees: remaining });
   } catch (err) {
     warnings.push(`Failed to update config: ${(err as Error).message}`);
   }
@@ -466,6 +489,15 @@ if (subcommand === "create") {
   const branch = args[1];
   if (!branch) {
     render(<ErrorMessage message="Usage: dev-proxy worktree destroy <branch>" />);
+  } else if (!isValidSubdomain(branch)) {
+    // Validate before any directory resolution / hook execution — an
+    // unvalidated branch flows into `{branch}` substitution and the hook cwd.
+    render(
+      <ErrorMessage
+        message={`Invalid branch name "${branch}"`}
+        hint="Use lowercase alphanumeric and hyphens only (e.g. fix-auth-bug)"
+      />,
+    );
   } else {
     render(<WorktreeDestroy branch={branch} />);
   }

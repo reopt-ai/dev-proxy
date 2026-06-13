@@ -30,7 +30,33 @@ function escapeHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Hop-by-hop headers must not be forwarded by a proxy (RFC 7230 §6.1).
+// Forwarding them can poison the keep-alive agent's pooled connections.
+const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+];
+
+/** Remove hop-by-hop headers (and any listed in `Connection`) in place. */
+function stripHopByHopHeaders(headers: http.IncomingHttpHeaders): void {
+  const connection = headers.connection;
+  if (typeof connection === "string") {
+    for (const name of connection.split(",")) {
+      const key = name.trim().toLowerCase();
+      if (key) Reflect.deleteProperty(headers, key);
+    }
+  }
+  for (const key of HOP_BY_HOP_HEADERS) Reflect.deleteProperty(headers, key);
 }
 
 function worktreeErrorPage(worktree: string, target: URL, error: string): string {
@@ -196,8 +222,9 @@ function createRequestHandler(
 
     emitter.emit("request", event);
 
-    // Strip any client-supplied forwarding headers, then set ours
+    // Strip hop-by-hop and any client-supplied forwarding headers, then set ours
     const headers = clientReq.headers;
+    stripHopByHopHeaders(headers);
     delete headers["x-forwarded-for"];
     delete headers["x-forwarded-host"];
     delete headers["x-forwarded-proto"];
@@ -208,6 +235,12 @@ function createRequestHandler(
     if (worktree) {
       headers.host = host.replace(`${worktree}--`, "");
     }
+
+    // A single request can surface a terminal event from multiple sources
+    // (proxyRes error, proxyReq error, normal completion). Guard so only the
+    // first one emits and touches clientRes — otherwise a late error fires a
+    // second writeHead/end and throws ERR_HTTP_HEADERS_SENT.
+    let settled = false;
 
     const transport = requestTransport(target);
     const proxyReq = transport.request(
@@ -226,6 +259,8 @@ function createRequestHandler(
           responseSize += chunk.length;
         });
         proxyRes.on("end", () => {
+          if (settled) return;
+          settled = true;
           event.statusCode = proxyRes.statusCode;
           event.duration = Math.round(performance.now() - start);
           event.responseHeaders = collectDetail ? headersToRecord(proxyRes.headers) : {};
@@ -233,13 +268,20 @@ function createRequestHandler(
           emitter.emit("request:complete", event);
         });
         proxyRes.on("error", (err) => {
+          if (settled) return;
+          settled = true;
           event.error = err.message;
           event.duration = Math.round(performance.now() - start);
           emitter.emit("request:error", event);
           if (!clientRes.headersSent) clientRes.writeHead(502);
-          clientRes.end();
+          if (!clientRes.writableEnded) clientRes.end();
         });
 
+        // Client aborted mid-response — tear down the upstream stream so the
+        // keep-alive socket isn't left draining bytes with nowhere to go.
+        clientRes.on("close", () => {
+          if (!proxyRes.complete) proxyRes.destroy();
+        });
         clientRes.on("error", () => {
           // Client disconnected — best-effort, nothing to do
           proxyRes.destroy();
@@ -251,6 +293,8 @@ function createRequestHandler(
     );
 
     proxyReq.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       event.error = err.message;
       event.duration = Math.round(performance.now() - start);
       emitter.emit("request:error", event);
@@ -265,7 +309,7 @@ function createRequestHandler(
           clientRes.writeHead(502, { "Content-Type": "text/plain" });
           clientRes.end(`Dev proxy: target not ready (${err.message})`);
         }
-      } else {
+      } else if (!clientRes.writableEnded) {
         clientRes.end();
       }
     });
@@ -465,6 +509,7 @@ function resetNextId(): void {
 
 export const __testing = {
   escapeHtml,
+  stripHopByHopHeaders,
   parseCookies,
   parseQuery,
   headersToRecord,

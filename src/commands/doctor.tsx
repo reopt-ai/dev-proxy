@@ -7,7 +7,11 @@ import * as net from "node:net";
 import { Box, Text, render, useApp } from "ink";
 import { config, CONFIG_DIR, GLOBAL_CONFIG_PATH } from "../proxy/config.js";
 import type { ProjectConfig } from "../proxy/config.js";
-import { getEntryPorts, readProjectConfig } from "../cli/config-io.js";
+import {
+  getEntryPorts,
+  readProjectConfig,
+  type WorktreeConfig,
+} from "../cli/config-io.js";
 import { Header, Check, Section } from "../cli/output.js";
 
 interface CheckResult {
@@ -182,7 +186,11 @@ function checkWorktreeConfig(projects: ProjectConfig[]): CheckResult[] {
   for (const project of projects) {
     const cfg = readProjectConfig(project.path);
     const worktrees = cfg.worktrees ?? {};
-    const wtConfig = cfg.worktreeConfig;
+    // worktreeConfig and routes come from the resolved singleton, which merges
+    // dev-proxy.config.mjs (the standard format). readProjectConfig reads JSON
+    // only, so cfg.worktreeConfig is always undefined for mjs-based projects.
+    const wtConfig = project.worktreeConfig as WorktreeConfig | undefined;
+    const routes = project.routes;
     const entries = Object.entries(worktrees);
 
     if (entries.length === 0) continue;
@@ -222,7 +230,7 @@ function checkWorktreeConfig(projects: ProjectConfig[]): CheckResult[] {
 
       // services vs routes cross-check
       if (wtConfig.services) {
-        const routeKeys = new Set(Object.keys(cfg.routes ?? {}));
+        const routeKeys = new Set(Object.keys(routes));
         for (const svc of Object.keys(wtConfig.services)) {
           if (!routeKeys.has(svc) && svc !== "*") {
             results.push({
