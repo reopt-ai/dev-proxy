@@ -17,6 +17,7 @@ interface MigrateResult {
   status:
     | "migrated"
     | "cleaned-legacy"
+    | "cleanup-failed"
     | "skipped-no-legacy"
     | "skipped-no-json"
     | "skipped-no-routes";
@@ -39,8 +40,8 @@ function migrateProject(projectPath: string): MigrateResult {
     const hasLegacyWtConfig = cfg.worktreeConfig !== undefined;
 
     if (!hasWorktrees && !hasLegacyWtConfig) {
-      cleanupLegacyFile(legacyPath);
-      return { path: projectPath, status: "cleaned-legacy" };
+      const cleaned = cleanupLegacyFile(legacyPath);
+      return { path: projectPath, status: cleaned ? "cleaned-legacy" : "cleanup-failed" };
     }
 
     if (hasWorktrees) {
@@ -54,8 +55,8 @@ function migrateProject(projectPath: string): MigrateResult {
       writeJsConfig(projectPath, routes, cfg.worktreeConfig);
     }
 
-    cleanupLegacyFile(legacyPath);
-    return { path: projectPath, status: "cleaned-legacy" };
+    const cleaned = cleanupLegacyFile(legacyPath);
+    return { path: projectPath, status: cleaned ? "cleaned-legacy" : "cleanup-failed" };
   }
 
   if (!existsSync(legacyPath)) {
@@ -78,17 +79,19 @@ function migrateProject(projectPath: string): MigrateResult {
   }
 
   // .dev-proxy.json no longer holds anything — delete it.
-  cleanupLegacyFile(legacyPath);
+  const cleaned = cleanupLegacyFile(legacyPath);
 
-  return { path: projectPath, status: "migrated" };
+  return { path: projectPath, status: cleaned ? "migrated" : "cleanup-failed" };
 }
 
-function cleanupLegacyFile(legacyPath: string): void {
-  if (!existsSync(legacyPath)) return;
+/** Delete the legacy file. Returns false if it still exists afterwards. */
+function cleanupLegacyFile(legacyPath: string): boolean {
+  if (!existsSync(legacyPath)) return true;
   try {
     unlinkSync(legacyPath);
+    return true;
   } catch {
-    /* best-effort cleanup */
+    return false;
   }
 }
 
@@ -113,8 +116,12 @@ function Migrate() {
   const migrated = results.filter(
     (r) => r.status === "migrated" || r.status === "cleaned-legacy",
   );
+  const failed = results.filter((r) => r.status === "cleanup-failed");
   const skipped = results.filter(
-    (r) => r.status !== "migrated" && r.status !== "cleaned-legacy",
+    (r) =>
+      r.status !== "migrated" &&
+      r.status !== "cleaned-legacy" &&
+      r.status !== "cleanup-failed",
   );
 
   return (
@@ -130,6 +137,14 @@ function Migrate() {
               ? `Cleaned legacy file: ${r.path}`
               : `Migrated: ${r.path}`
           }
+        />
+      ))}
+
+      {failed.map((r) => (
+        <ErrorMessage
+          key={r.path}
+          message={`Migrated contents but failed to delete legacy .dev-proxy.json: ${r.path}`}
+          hint="Remove it manually to avoid config precedence ambiguity"
         />
       ))}
 

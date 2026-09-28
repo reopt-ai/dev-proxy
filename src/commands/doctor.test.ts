@@ -259,21 +259,23 @@ describe("checkWorktreeConfig", () => {
   });
 
   it("validates portRange (min < max)", () => {
+    // worktrees come from the instance file (readProjectConfig); worktreeConfig
+    // and routes are resolved from dev-proxy.config.mjs into the ProjectConfig.
     readProjectConfigMock.mockReturnValue({
       worktrees: { feat1: { port: 4001 } },
-      worktreeConfig: {
-        portRange: [4000, 5000],
-        directory: "../{branch}",
-      },
     });
 
     const projects: ProjectConfig[] = [
       {
         path: "/p1",
-        configPath: "/p1/.dev-proxy.json",
-        configType: "json",
+        configPath: "/p1/dev-proxy.config.mjs",
+        configType: "js",
         routes: {},
         worktrees: {},
+        worktreeConfig: {
+          portRange: [4000, 5000],
+          directory: "../{branch}",
+        },
       },
     ];
 
@@ -286,19 +288,19 @@ describe("checkWorktreeConfig", () => {
   it("reports invalid portRange when min >= max", () => {
     readProjectConfigMock.mockReturnValue({
       worktrees: { feat1: { port: 4001 } },
-      worktreeConfig: {
-        portRange: [5000, 4000],
-        directory: "../{branch}",
-      },
     });
 
     const projects: ProjectConfig[] = [
       {
         path: "/p1",
-        configPath: "/p1/.dev-proxy.json",
-        configType: "json",
+        configPath: "/p1/dev-proxy.config.mjs",
+        configType: "js",
         routes: {},
         worktrees: {},
+        worktreeConfig: {
+          portRange: [5000, 4000],
+          directory: "../{branch}",
+        },
       },
     ];
 
@@ -310,19 +312,19 @@ describe("checkWorktreeConfig", () => {
   it("reports invalid portRange when min === max", () => {
     readProjectConfigMock.mockReturnValue({
       worktrees: { feat1: { port: 4001 } },
-      worktreeConfig: {
-        portRange: [5000, 5000],
-        directory: "../{branch}",
-      },
     });
 
     const projects: ProjectConfig[] = [
       {
         path: "/p1",
-        configPath: "/p1/.dev-proxy.json",
-        configType: "json",
+        configPath: "/p1/dev-proxy.config.mjs",
+        configType: "js",
         routes: {},
         worktrees: {},
+        worktreeConfig: {
+          portRange: [5000, 5000],
+          directory: "../{branch}",
+        },
       },
     ];
 
@@ -333,25 +335,24 @@ describe("checkWorktreeConfig", () => {
 
   it("cross-checks services against routes — warns for service not in routes", () => {
     readProjectConfigMock.mockReturnValue({
-      routes: { app: "http://localhost:3000" },
       worktrees: { feat1: { ports: { app: 4001, api: 4002 } } },
-      worktreeConfig: {
-        portRange: [4000, 5000],
-        directory: "../{branch}",
-        services: {
-          app: { env: "PORT_APP" },
-          api: { env: "PORT_API" },
-        },
-      },
     });
 
     const projects: ProjectConfig[] = [
       {
         path: "/p1",
-        configPath: "/p1/.dev-proxy.json",
-        configType: "json",
-        routes: {},
+        configPath: "/p1/dev-proxy.config.mjs",
+        configType: "js",
+        routes: { app: "http://localhost:3000" },
         worktrees: {},
+        worktreeConfig: {
+          portRange: [4000, 5000],
+          directory: "../{branch}",
+          services: {
+            app: { env: "PORT_APP" },
+            api: { env: "PORT_API" },
+          },
+        },
       },
     ];
 
@@ -364,25 +365,24 @@ describe("checkWorktreeConfig", () => {
 
   it("reports valid when all services are in routes", () => {
     readProjectConfigMock.mockReturnValue({
-      routes: { app: "http://localhost:3000", api: "http://localhost:4000" },
       worktrees: { feat1: { ports: { app: 4001, api: 4002 } } },
-      worktreeConfig: {
-        portRange: [4000, 5000],
-        directory: "../{branch}",
-        services: {
-          app: { env: "PORT_APP" },
-          api: { env: "PORT_API" },
-        },
-      },
     });
 
     const projects: ProjectConfig[] = [
       {
         path: "/p1",
-        configPath: "/p1/.dev-proxy.json",
-        configType: "json",
-        routes: {},
+        configPath: "/p1/dev-proxy.config.mjs",
+        configType: "js",
+        routes: { app: "http://localhost:3000", api: "http://localhost:4000" },
         worktrees: {},
+        worktreeConfig: {
+          portRange: [4000, 5000],
+          directory: "../{branch}",
+          services: {
+            app: { env: "PORT_APP" },
+            api: { env: "PORT_API" },
+          },
+        },
       },
     ];
 
@@ -467,25 +467,24 @@ describe("checkWorktreeConfig", () => {
 
   it("handles wildcard service in cross-check (does not warn for '*')", () => {
     readProjectConfigMock.mockReturnValue({
-      routes: { app: "http://localhost:3000" },
       worktrees: { feat1: { ports: { app: 4001 } } },
-      worktreeConfig: {
-        portRange: [4000, 5000],
-        directory: "../{branch}",
-        services: {
-          app: { env: "PORT_APP" },
-          "*": { env: "PORT_DEFAULT" },
-        },
-      },
     });
 
     const projects: ProjectConfig[] = [
       {
         path: "/p1",
-        configPath: "/p1/.dev-proxy.json",
-        configType: "json",
-        routes: {},
+        configPath: "/p1/dev-proxy.config.mjs",
+        configType: "js",
+        routes: { app: "http://localhost:3000" },
         worktrees: {},
+        worktreeConfig: {
+          portRange: [4000, 5000],
+          directory: "../{branch}",
+          services: {
+            app: { env: "PORT_APP" },
+            "*": { env: "PORT_DEFAULT" },
+          },
+        },
       },
     ];
 
