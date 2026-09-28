@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectConfig } from "./config.js";
+import type { WorktreeEntry } from "./worktrees.js";
 
 // ── Mocks ───────────────────────────────────────────────────
 // Must be set up before importing the module under test.
@@ -95,6 +96,34 @@ describe("isValidEntry", () => {
   it("rejects legacy entry with non-number port", () => {
     // @ts-expect-error — testing runtime validation
     expect(isValidEntry({ port: "4000" })).toBe(false);
+  });
+
+  it("rejects multi-service entry with a non-numeric port value", () => {
+    // @ts-expect-error — testing runtime validation
+    expect(isValidEntry({ ports: { web: "abc" } })).toBe(false);
+  });
+
+  it("rejects ports that are not positive integers", () => {
+    expect(isValidEntry({ ports: { web: 0 } })).toBe(false);
+    expect(isValidEntry({ ports: { web: -1 } })).toBe(false);
+    expect(isValidEntry({ ports: { web: 3000.5 } })).toBe(false);
+    expect(isValidEntry({ ports: { web: 70000 } })).toBe(false);
+    expect(isValidEntry({ port: 0 })).toBe(false);
+  });
+});
+
+describe("getWorktreeTarget — port validation", () => {
+  it("returns null when an entry's port is out of range", () => {
+    // Bypass isValidEntry by setting the map directly
+    __testing.worktreeMap = new Map([["feat", { port: 99999 }]]);
+    expect(getWorktreeTarget("feat")).toBeNull();
+  });
+
+  it("returns null when a multi-service port is invalid", () => {
+    // Bypass isValidEntry by casting a deliberately malformed entry
+    const malformed = { ports: { web: "nope" } } as unknown as WorktreeEntry;
+    __testing.worktreeMap = new Map([["feat", malformed]]);
+    expect(getWorktreeTarget("feat", "web")).toBeNull();
   });
 });
 
@@ -301,10 +330,20 @@ describe("getWorktreeTarget — multi-service", () => {
     expect(url?.href).toBe("http://localhost:5001/");
   });
 
-  it("falls back to first port for unknown service name", () => {
+  it("returns null for an unknown service name (no silent fallback)", () => {
     __testing.worktreeMap = new Map([["feat", { ports: { web: 5000, api: 5001 } }]]);
 
+    // A named service that isn't registered must not route to another
+    // service's port — that masks misconfiguration. Per the routing invariant,
+    // an unresolved worktree service yields the offline error page, not a guess.
     const url = getWorktreeTarget("feat", "nonexistent");
+    expect(url).toBeNull();
+  });
+
+  it("falls back to the first port only when no service is given", () => {
+    __testing.worktreeMap = new Map([["feat", { ports: { web: 5000, api: 5001 } }]]);
+
+    const url = getWorktreeTarget("feat");
     expect(url).toBeInstanceOf(URL);
     expect(url?.href).toBe("http://localhost:5000/");
   });

@@ -134,9 +134,9 @@ describe("getServicePort", () => {
     expect(getServicePort(entry)).toBe(3000);
   });
 
-  it("returns first port when service not found", () => {
+  it("returns null when a named service is not found (no silent fallback)", () => {
     const entry = { ports: { web: 3000 } };
-    expect(getServicePort(entry, "missing")).toBe(3000);
+    expect(getServicePort(entry, "missing")).toBeNull();
   });
 
   it("returns port from legacy entry regardless of service param", () => {

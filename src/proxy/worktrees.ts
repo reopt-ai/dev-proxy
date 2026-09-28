@@ -36,11 +36,16 @@ function notify() {
 
 // ── Core API ─────────────────────────────────────────────────
 
+function isValidPort(port: unknown): port is number {
+  return typeof port === "number" && Number.isInteger(port) && port > 0 && port < 65536;
+}
+
 function isValidEntry(entry: WorktreeEntry): boolean {
   if ("ports" in entry) {
-    return Object.keys(entry.ports).length > 0;
+    const values = Object.values(entry.ports);
+    return values.length > 0 && values.every(isValidPort);
   }
-  return typeof entry.port === "number";
+  return isValidPort(entry.port);
 }
 
 function readRegistry(): void {
@@ -120,14 +125,15 @@ export function getWorktreeTarget(branch: string, service?: string): URL | null 
   if (!entry) return null;
 
   if ("ports" in entry) {
-    const port =
-      service && service in entry.ports
-        ? entry.ports[service]
-        : Object.values(entry.ports)[0];
-    if (port === undefined) return null;
+    // A named service that isn't registered must not silently fall back to
+    // another service's port — that masks misconfiguration and can route to
+    // the wrong app. Only default to the first port when no service is given.
+    const port = service ? entry.ports[service] : Object.values(entry.ports)[0];
+    if (!isValidPort(port)) return null;
     return new URL(`http://localhost:${port}`);
   }
 
+  if (!isValidPort(entry.port)) return null;
   return new URL(`http://localhost:${entry.port}`);
 }
 
@@ -152,6 +158,7 @@ export function useWorktrees(): Map<string, WorktreeEntry> {
 }
 
 export const __testing = {
+  isValidPort,
   isValidEntry,
   readRegistry,
   readProjectWorktrees,

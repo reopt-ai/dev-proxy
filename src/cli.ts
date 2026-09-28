@@ -11,10 +11,11 @@ export const KNOWN_COMMANDS = [
 const args = process.argv.slice(2);
 const command = args[0];
 
-// Global flags — take priority over subcommands
-if (args.includes("--help") || args.includes("-h")) {
+// Global flags — only when in the command position, so a subcommand argument
+// named `--help`/`-v` (or a flag passed to a subcommand) isn't hijacked.
+if (command === "--help" || command === "-h") {
   await import("./commands/help.js");
-} else if (args.includes("--version") || args.includes("-v")) {
+} else if (command === "--version" || command === "-v") {
   await import("./commands/version.js");
 } else {
   switch (command) {
