@@ -44,13 +44,7 @@ export function getListDimensions(
 }
 
 export type HeaderTokenKind =
-  | "requests"
-  | "follow"
-  | "meta"
-  | "filter-label"
-  | "err"
-  | "quiet"
-  | "query";
+  "requests" | "follow" | "meta" | "filter-label" | "err" | "quiet" | "query";
 
 export interface HeaderToken {
   text: string;
