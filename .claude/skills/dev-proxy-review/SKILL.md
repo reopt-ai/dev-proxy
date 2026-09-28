@@ -7,7 +7,7 @@ description: |
   Triggers on: "dev-proxy review", "release review", "pre-release check",
   "review", "publish review".
 metadata:
-  version: 2.0.0
+  verified-against: "@reopt-ai/dev-proxy >= 1.2.0"
   internal: true
 ---
 
@@ -59,19 +59,39 @@ If it crashes or prints nothing, the build is broken.
 npm pack --dry-run
 ```
 
-Confirm the output includes exactly these entries:
+`package.json` uses a `files` whitelist — only entries listed there are
+shipped. Cross-reference:
 
-- `bin/dev-proxy.js`
-- `dist/**/*.js` (compiled source)
-- `LICENSE`
-- `README.md`
-- `README_KO.md`
-- `package.json`
+```bash
+jq -r '.files[]' package.json
+```
 
-It must NOT include: `src/`, `node_modules/`, `.github/`, test files, `tsconfig*.json`.
-Check the total package size is reasonable (under 150 kB).
+Every glob in `files` must appear in `npm pack` output, and nothing else
+(no `src/`, `node_modules/`, `.github/`, test files, `tsconfig*.json`,
+`.releaserc.json`). Check the total package size is reasonable (under 150 kB).
 
-### 1.5 Clean working tree
+### 1.5 Verify semantic-release configuration
+
+```bash
+cat .releaserc.json
+ls .github/workflows/release.yml
+```
+
+Confirm:
+
+- `.releaserc.json` lists `@semantic-release/commit-analyzer`,
+  `@semantic-release/release-notes-generator`, `@semantic-release/npm`,
+  `@semantic-release/exec` (GitHub Packages mirror publish), and
+  `@semantic-release/github` plugins in that order
+- `branches` is `["main"]`
+- `.github/workflows/release.yml` contains a `pnpm exec semantic-release`
+  step with `packages: write` permission (mirror publish needs it)
+
+If any plugin is missing or misordered, stop and fix before continuing —
+release will partially succeed and leave npmjs.org / GitHub Packages out
+of sync.
+
+### 1.6 Clean working tree
 
 ```bash
 git status
@@ -120,7 +140,7 @@ Read `docs/guide/installation.md`. Verify:
 - Config JSON examples match the `RawGlobalConfig` and `RawProjectConfig` interfaces in `src/cli/config-io.ts`
 - `worktreeConfig` example matches the `WorktreeConfig` interface
 - All CLI commands referenced actually exist
-- The three project config files (`dev-proxy.config.mjs` for routes, `.dev-proxy.json` for `worktreeConfig`, `.dev-proxy.worktrees.json` for the CLI-managed worktree instance map) are described accurately and consistently with `PROJECT_CONFIG_NAME` / `PROJECT_WORKTREES_NAME` in `src/proxy/config.ts`
+- The two project files for new setups (`dev-proxy.config.mjs` for routes + `worktreeConfig`, `.dev-proxy.worktrees.json` for the CLI-managed worktree instance map) are described accurately and consistently with `JS_CONFIG_NAMES` / `PROJECT_WORKTREES_NAME` in `src/proxy/config.ts`. `.dev-proxy.json` should be described as a legacy read-only fallback only (deleted by `dev-proxy migrate`)
 
 ### 2.5 Help text
 
@@ -148,7 +168,17 @@ Every commit must follow `<type>(<scope>): <subject>`. Verify:
 - Breaking changes use `!` suffix (e.g., `feat!: ...`)
 - No commits violate the convention (semantic-release ignores non-conforming commits)
 
-### 3.3 Preview release impact
+### 3.3 Detect explicit breaking changes
+
+```bash
+git log $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD~20)..HEAD --grep="BREAKING CHANGE" --format="%h %s"
+```
+
+If anything prints, the next release will be a **major** bump even if all
+commit subjects look like patches. Confirm this with the user before
+pushing.
+
+### 3.4 Preview release impact
 
 Based on commit types, inform the user what semantic-release will do:
 
@@ -183,16 +213,21 @@ git push origin main
 ### 4.3 Wait for CI
 
 ```bash
-gh run list --branch main --limit 1 --json status,conclusion,name
+gh run list --branch main --workflow release.yml --limit 1 --json status,conclusion,name
 ```
 
-The latest run must show `"conclusion": "success"`. If it shows `"status": "in_progress"`, wait and re-check:
+The latest `release.yml` run must show `"conclusion": "success"`. If it
+shows `"status": "in_progress"`, wait and re-check:
 
 ```bash
 gh run watch
 ```
 
-**If CI fails, investigate the failure before retrying.**
+**If CI fails, investigate the failure before retrying.** Common
+failures: `@semantic-release/exec` mirror publish (GitHub Packages
+authentication or missing `packages: write` permission). The mirror is
+fail-soft — npmjs.org release still succeeds, but verify both targets in
+step 4.4.
 
 ### 4.4 Verify release was created
 
@@ -200,10 +235,18 @@ If releasable commits were present:
 
 ```bash
 npm view @reopt-ai/dev-proxy version
+npm view @reopt-ai/dev-proxy version --registry=https://npm.pkg.github.com
 gh release list --limit 1
 ```
 
-Confirm the new version matches the expected bump from step 3.3.
+Confirm:
+
+- Both registries report the new version
+- The GitHub Release exists with the same tag
+- The new version matches the expected bump from step 3.4
+
+If the GitHub Packages mirror lags behind npmjs.org, check the
+`@semantic-release/exec` step in the release workflow logs.
 
 ### 4.5 Print summary
 
