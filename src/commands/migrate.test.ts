@@ -128,6 +128,22 @@ describe("migrateProject", () => {
     expect(mockUnlinkSync).toHaveBeenCalled();
   });
 
+  it('returns "cleanup-failed" when the legacy file cannot be deleted', () => {
+    resolveProjectConfigFileMock.mockReturnValue(null);
+    mockExistsSync.mockReturnValue(true);
+    readProjectConfigMock.mockReturnValue({
+      routes: { app: "http://localhost:3000" },
+    });
+    mockUnlinkSync.mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+
+    const result = migrateProject("/p");
+    // Contents were migrated, but the stale legacy file remains — surface it.
+    expect(result).toEqual({ path: "/p", status: "cleanup-failed" });
+    expect(writeJsConfigMock).toHaveBeenCalled();
+  });
+
   it("moves worktreeConfig into mjs as the third argument", () => {
     resolveProjectConfigFileMock.mockReturnValue(null);
     mockExistsSync.mockReturnValue(true);
