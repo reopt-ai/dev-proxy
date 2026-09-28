@@ -5,5 +5,11 @@
     "declaration": true,
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/**/*.test.tsx"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/__test-utils__"
+  ]
 }
