@@ -245,7 +245,7 @@ function checkWorktreeConfig(projects: ProjectConfig[]): CheckResult[] {
 
     // Per-worktree directory + env file checks
     if (wtConfig) {
-      for (const [branch, entry] of entries) {
+      for (const [branch] of entries) {
         const dirPattern = wtConfig.directory.replace("{branch}", branch);
         const worktreeDir = resolve(project.path, dirPattern);
 
@@ -277,10 +277,6 @@ function checkWorktreeConfig(projects: ProjectConfig[]): CheckResult[] {
             });
           }
         }
-
-        // Check if worktree ports are reachable
-        // (done async below)
-        void entry; // used in async check
       }
     }
   }
