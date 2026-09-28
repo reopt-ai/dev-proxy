@@ -64,27 +64,27 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "dependencies": {
-    "ink": "^7.0.2",
+    "ink": "^7.1.1",
     "ink-select-input": "^6.2.0",
     "ink-text-input": "^6.0.0",
-    "react": "^19.0.0"
+    "react": "^19.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@semantic-release/exec": "^7.1.0",
-    "@semantic-release/github": "^12.0.6",
-    "@types/node": "^25.5.0",
-    "@types/react": "^19.0.0",
-    "@vitest/coverage-v8": "^3.2.4",
-    "conventional-changelog-conventionalcommits": "^9.3.0",
-    "eslint": "^10.1.0",
+    "@semantic-release/github": "^12.0.10",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@vitest/coverage-v8": "^5.0.2",
+    "conventional-changelog-conventionalcommits": "^10.4.0",
+    "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "prettier": "^3.8.1",
-    "semantic-release": "^25.0.3",
-    "tsx": "^4.21.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.9",
+    "semantic-release": "^25.0.9",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.57.2",
-    "vitest": "^3.2.4"
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
   }
 }
