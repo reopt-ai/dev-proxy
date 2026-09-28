@@ -519,7 +519,6 @@ describe("selectNext", () => {
   });
 
   it("no-op when events array is empty", () => {
-    const before = __testing.snapshot().version;
     selectNext();
     // Version still increments on notifySync but selectedIndex stays -1
     expect(__testing.snapshot().selectedIndex).toBe(-1);
@@ -527,7 +526,6 @@ describe("selectNext", () => {
 
     // Verify no crash occurred — snapshot is still valid
     expect(__testing.snapshot().events).toHaveLength(0);
-    void before; // acknowledged
   });
 });
 
@@ -947,5 +945,111 @@ describe("subscribe", () => {
     expect(listener1).not.toHaveBeenCalled();
     expect(listener2).toHaveBeenCalled();
     unsub2();
+  });
+});
+
+describe("curl export and replay info edge cases", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  it("returns null when nothing is selected", () => {
+    expect(getSelectedCurl()).toBeNull();
+    expect(getSelectedReplayInfo()).toBeNull();
+  });
+
+  it("returns null when the selected event is a websocket", () => {
+    pushWs(makeWsEvent({ id: "ws-1", status: "open", url: "/socket" }));
+
+    expect(getSelected()?.type).toBe("ws");
+    expect(getSelectedCurl()).toBeNull();
+    expect(getSelectedReplayInfo()).toBeNull();
+  });
+
+  it("adds the method flag for non-GET requests and omits it for GET", () => {
+    pushHttp(makeHttpEvent({ id: "get-1", url: "/items" }));
+    expect(getSelectedCurl()).not.toContain("-X");
+
+    pushHttp(makeHttpEvent({ id: "post-1", url: "/items", method: "POST" }));
+    expect(getSelectedCurl()).toContain("-X POST");
+  });
+
+  it("skips the host header and joins multi-value headers", () => {
+    pushHttp(
+      makeHttpEvent({
+        id: "multi-1",
+        url: "/items",
+        requestHeaders: {
+          host: "www.example.dev:3000",
+          accept: ["text/html", "application/json"],
+        },
+      }),
+    );
+
+    const curl = getSelectedCurl();
+    expect(curl).toContain("-H 'accept: text/html, application/json'");
+    expect(curl).not.toContain("host:");
+  });
+
+  it("exports only the URL when detail was not captured", () => {
+    setInspectActive(false);
+    pushHttp(
+      makeHttpEvent({
+        id: "no-detail-1",
+        url: "/items",
+        requestHeaders: { host: "h", authorization: "Bearer x" },
+      }),
+    );
+
+    const curl = getSelectedCurl();
+    expect(curl).toContain("'http://www.example.dev:3000/items'");
+    expect(curl).not.toContain("-H");
+  });
+});
+
+describe("selection with no visible events", () => {
+  beforeEach(() => {
+    __testing.reset();
+  });
+
+  it("selectLast and selectByFilteredIndex are no-ops on an empty store", () => {
+    selectLast();
+    selectByFilteredIndex(0);
+
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+    expect(getSelected()).toBeUndefined();
+  });
+
+  it("re-enabling follow on an empty store leaves nothing selected", () => {
+    toggleFollow();
+    toggleFollow();
+
+    expect(getFollowMode()).toBe(true);
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+  });
+
+  it("clears the selection when errors-only hides every event", () => {
+    pushHttp(makeHttpEvent({ id: "ok-1", url: "/ok", statusCode: 200 }));
+    expect(getSelected()?.id).toBe("ok-1");
+
+    toggleErrorsOnly();
+
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+    expect(getSelected()).toBeUndefined();
+  });
+
+  it("clears the selection when the search query matches nothing", () => {
+    pushHttp(makeHttpEvent({ id: "ok-2", url: "/products" }));
+
+    setSearchQuery("does-not-match-anything");
+
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
+    expect(getSelected()).toBeUndefined();
+  });
+
+  it("clears the selection when showing noise is toggled on an empty store", () => {
+    toggleHideNoise();
+
+    expect(__testing.snapshot().selectedIndex).toBe(-1);
   });
 });
