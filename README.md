@@ -162,6 +162,31 @@ mkcert -install
 
 When mkcert is installed, dev-proxy automatically generates wildcard certificates on first run. No manual steps needed.
 
+### Access from other devices
+
+The proxy listens on every interface, so a phone or a teammate's laptop on the same network can reach it at `http://<your-lan-ip>:3000` right away. What they cannot do out of the box is resolve `*.example.dev` to your machine, or trust your mkcert certificate. Pick one of these setups:
+
+|                                              | DNS                                                                          | TLS                                       | Works on phones        |
+| -------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------- | ---------------------- |
+| **Public DNS + Let's Encrypt** (recommended) | wildcard `A` record on a domain you own → your LAN IP                        | real certificate via DNS-01 challenge     | yes, zero device setup |
+| **dnsmasq on your machine**                  | run dnsmasq bound to your LAN IP, point devices (or the router's DHCP) at it | install the mkcert root CA on each device | yes, after CA install  |
+| **hosts file per device**                    | edit `/etc/hosts` on each device                                             | install the mkcert root CA on each device | no                     |
+
+**Public DNS + Let's Encrypt**
+
+1. Reserve a fixed LAN IP for your machine in your router (DHCP reservation).
+2. Add `*.dev.example.com` and `dev.example.com` `A` records pointing at that private IP. Some routers block DNS answers that contain private IPs (rebinding protection) — allow the domain in the router if `nslookup app.dev.example.com` fails on another device.
+3. Issue a wildcard certificate with the DNS-01 challenge, e.g. `certbot certonly --manual --preferred-challenges dns -d '*.dev.example.com' -d dev.example.com`, and point `certPath` / `keyPath` in `~/.dev-proxy/config.json` at the issued files.
+4. Set `domain` to `dev.example.com`.
+
+Keep in mind the record is public: anyone can look up that `*.dev.example.com` points at a private address, although only devices on your network can reach it.
+
+**Sharing the mkcert CA instead**
+
+`mkcert -CAROOT` prints the directory holding `rootCA.pem`. Install that file as a trusted root on each device (iOS: AirDrop → install profile → Settings › General › About › Certificate Trust Settings; Android: Settings › Security › Install a certificate). The existing wildcard certificate already covers every subdomain, so nothing needs to be re-issued.
+
+In every setup, run `dev-proxy doctor`: the **Network** section shows the address other devices can use, **DNS** reports whether each hostname resolves to loopback (this machine only) or to your LAN address (reachable from the network), and **TLS** tells you whether the certificate is mkcert-issued or publicly trusted.
+
 ### Worktree Routing
 
 dev-proxy supports git worktree-based dynamic routing. When you use `branch--app.domain` as the hostname, it routes to a per-worktree port.
@@ -299,7 +324,7 @@ The TUI has three states:
 This is a **development tool** and makes deliberate trade-offs for local development convenience:
 
 - **`rejectUnauthorized: false`** — The proxy accepts self-signed certificates from upstream targets. This is intentional so that dev services using mkcert or self-signed certs work without extra configuration. **Do not use this proxy in production.**
-- **No authentication** — The proxy binds to localhost by default with no auth layer.
+- **No authentication** — The proxy listens on all interfaces with no auth layer, so anything that can reach your machine on the proxy ports can use it. Keep it on trusted networks.
 
 ## Troubleshooting
 
