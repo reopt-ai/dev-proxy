@@ -133,7 +133,7 @@ export default {
 };
 ```
 
-- `"@"` matches the **apex** (bare) domain — e.g. `reopt.de` itself, with no subdomain. Optional; falls back to `"*"` if absent.
+- `"@"` matches the **apex** (bare) domain — e.g. `example.dev` itself, with no subdomain. Optional; falls back to `"*"` if absent.
 - `"*"` is a wildcard — unmatched subdomains route here
 - When multiple projects register the same subdomain, the first one wins
 - `certPath`/`keyPath` are set in the global config, resolved relative to `~/.dev-proxy/`

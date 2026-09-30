@@ -229,7 +229,7 @@ const SUBDOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 /**
  * Validate a route key. Accepts:
  *   - `"*"` — wildcard for unmatched subdomains
- *   - `"@"` — apex (bare domain — e.g. `reopt.de` itself)
+ *   - `"@"` — apex (bare domain — e.g. `example.dev` itself)
  *   - lowercase alphanumeric + hyphens, no leading/trailing hyphen
  */
 export function isValidSubdomain(value: string): boolean {

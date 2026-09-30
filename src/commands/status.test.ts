@@ -42,7 +42,7 @@ describe("formatTarget", () => {
 
 describe("projectLabel", () => {
   it("returns basename of absolute path", () => {
-    expect(projectLabel("/Users/eric/reopt-ai/reopt")).toBe("reopt");
+    expect(projectLabel("/Users/me/projects/reopt")).toBe("reopt");
   });
 
   it("returns basename of nested path", () => {
