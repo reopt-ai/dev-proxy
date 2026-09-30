@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import * as dns from "node:dns";
 import * as net from "node:net";
+import * as os from "node:os";
+import { X509Certificate } from "node:crypto";
 import { Box, Text, render, useApp } from "ink";
 import { config, CONFIG_DIR, GLOBAL_CONFIG_PATH } from "../proxy/config.js";
 import type { ProjectConfig } from "../proxy/config.js";
@@ -85,32 +87,133 @@ function checkProjectsSection(): CheckResult[] {
   return results;
 }
 
+/** Subset of X509Certificate the cert checks depend on (keeps tests fixture-free). */
+interface CertInfo {
+  issuer: string;
+  validTo: string;
+  checkHost(name: string): string | undefined;
+}
+
+const CERT_EXPIRY_WARN_MS = 14 * 24 * 60 * 60 * 1000;
+
+function describeCert(cert: CertInfo, domain: string, now = Date.now()): CheckResult[] {
+  const results: CheckResult[] = [];
+
+  const issuerCn = /CN=([^\n]+)/.exec(cert.issuer)?.[1] ?? cert.issuer;
+  if (/mkcert/i.test(cert.issuer)) {
+    results.push({
+      ok: true,
+      label:
+        "issued by mkcert — trusted on this machine only; install its root CA on other devices",
+    });
+  } else {
+    results.push({ ok: true, label: `issued by ${issuerCn}` });
+  }
+
+  const probe = `doctor-probe.${domain}`;
+  const covers =
+    cert.checkHost(probe) !== undefined && cert.checkHost(domain) !== undefined;
+  results.push({
+    ok: covers,
+    label: covers
+      ? `covers *.${domain} and ${domain}`
+      : `does not cover *.${domain} and ${domain}`,
+  });
+
+  const expiresAt = Date.parse(cert.validTo);
+  const remaining = expiresAt - now;
+  const expiry = new Date(expiresAt).toISOString().slice(0, 10);
+  if (remaining <= 0) {
+    results.push({ ok: false, label: `expired on ${expiry}` });
+  } else if (remaining < CERT_EXPIRY_WARN_MS) {
+    results.push({ ok: false, warn: true, label: `expires on ${expiry} — renew soon` });
+  } else {
+    results.push({ ok: true, label: `valid until ${expiry}` });
+  }
+
+  return results;
+}
+
 function checkTlsSection(): CheckResult[] {
   const results: CheckResult[] = [];
 
-  // mkcert installed
+  // mkcert installed — only required when no explicit cert is configured
+  const explicit = Boolean(config.certPath && config.keyPath);
   try {
     execFileSync("which", ["mkcert"], { stdio: "pipe" });
     results.push({ ok: true, label: "mkcert is installed" });
   } catch {
-    results.push({ ok: false, label: "mkcert is not installed" });
+    results.push({ ok: !explicit, warn: explicit, label: "mkcert is not installed" });
   }
 
-  // cert files
+  // cert files — explicit config wins, otherwise the mkcert default location
   const certsDir = resolve(CONFIG_DIR, "certs");
-  const certFile = resolve(certsDir, "cert.pem");
-  const keyFile = resolve(certsDir, "key.pem");
+  const certFile = config.certPath ?? resolve(certsDir, `${config.domain}+1.pem`);
+  const keyFile = config.keyPath ?? resolve(certsDir, `${config.domain}+1-key.pem`);
   const certExists = existsSync(certFile);
   const keyExists = existsSync(keyFile);
   results.push({
     ok: certExists && keyExists,
+    warn: !explicit,
     label:
       certExists && keyExists
-        ? `cert files exist in ${certsDir}`
-        : `cert files missing in ${certsDir}`,
+        ? `cert: ${certFile}`
+        : explicit
+          ? `configured cert/key missing: ${certFile}`
+          : `cert files missing in ${certsDir} (generated on first run)`,
   });
 
+  if (certExists) {
+    try {
+      results.push(
+        ...describeCert(new X509Certificate(readFileSync(certFile)), config.domain),
+      );
+    } catch {
+      results.push({
+        ok: false,
+        label: `cert is not a valid PEM certificate: ${certFile}`,
+      });
+    }
+  }
+
   return results;
+}
+
+// ── Network ──────────────────────────────────────────────────
+
+/** IPv4 addresses other devices on the local network can reach this machine at. */
+function getLanAddresses(): string[] {
+  const addrs: string[] = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal) addrs.push(entry.address);
+    }
+  }
+  return addrs;
+}
+
+type AddressKind = "loopback" | "lan" | "other";
+
+function classifyAddress(address: string, lanAddresses: string[]): AddressKind {
+  if (address.startsWith("127.")) return "loopback";
+  if (lanAddresses.includes(address)) return "lan";
+  return "other";
+}
+
+function checkNetworkSection(lanAddresses: string[]): CheckResult[] {
+  if (lanAddresses.length === 0) {
+    return [
+      {
+        ok: false,
+        warn: true,
+        label: "no LAN address — other devices cannot reach this machine",
+      },
+    ];
+  }
+  return lanAddresses.map((addr) => ({
+    ok: true,
+    label: `reachable at ${addr}:${String(config.port)} (https :${String(config.httpsPort)})`,
+  }));
 }
 
 function collectSubdomains(projects: ProjectConfig[]): string[] {
@@ -138,7 +241,33 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-async function checkDns(subdomains: string[], domain: string): Promise<CheckResult[]> {
+function describeDnsResult(
+  hostname: string,
+  address: string,
+  lanAddresses: string[],
+): CheckResult {
+  switch (classifyAddress(address, lanAddresses)) {
+    case "loopback":
+      return { ok: true, label: `${hostname} → ${address} (this machine only)` };
+    case "lan":
+      return {
+        ok: true,
+        label: `${hostname} → ${address} (reachable from your network)`,
+      };
+    case "other":
+      return {
+        ok: false,
+        warn: true,
+        label: `${hostname} → ${address} (expected 127.0.0.1 or this machine's LAN address)`,
+      };
+  }
+}
+
+async function checkDns(
+  subdomains: string[],
+  domain: string,
+  lanAddresses: string[],
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   for (const sub of subdomains) {
@@ -148,14 +277,7 @@ async function checkDns(subdomains: string[], domain: string): Promise<CheckResu
         dns.promises.lookup(hostname, { family: 4 }),
         5000,
       );
-      results.push({
-        ok: address === "127.0.0.1",
-        warn: address !== "127.0.0.1",
-        label:
-          address === "127.0.0.1"
-            ? `${hostname} → 127.0.0.1`
-            : `${hostname} → ${address} (expected 127.0.0.1)`,
-      });
+      results.push(describeDnsResult(hostname, address, lanAddresses));
     } catch {
       results.push({ ok: false, label: `${hostname} does not resolve` });
     }
@@ -328,6 +450,10 @@ async function checkWorktreePorts(projects: ProjectConfig[]): Promise<CheckResul
   return Promise.all(checks);
 }
 
+// Interfaces do not change while doctor runs; resolve once so the render
+// and the async DNS check see the same addresses.
+const lanAddresses = getLanAddresses();
+
 function Doctor() {
   const { exit } = useApp();
   const [asyncChecks, setAsyncChecks] = useState<{
@@ -339,6 +465,7 @@ function Doctor() {
   const configChecks = checkConfigSection();
   const projectChecks = checkProjectsSection();
   const tlsChecks = checkTlsSection();
+  const networkChecks = checkNetworkSection(lanAddresses);
   const worktreeChecks = checkWorktreeConfig(config.projects);
 
   useEffect(() => {
@@ -346,7 +473,7 @@ function Doctor() {
     void (async () => {
       const subdomains = collectSubdomains(config.projects);
       const [dnsResults, httpPort, httpsPort, wtPorts] = await Promise.all([
-        checkDns(subdomains, config.domain),
+        checkDns(subdomains, config.domain, lanAddresses),
         checkPort(config.port),
         checkPort(config.httpsPort),
         checkWorktreePorts(config.projects),
@@ -375,6 +502,7 @@ function Doctor() {
     ...configChecks,
     ...projectChecks,
     ...tlsChecks,
+    ...networkChecks,
     ...worktreeChecks,
     ...(asyncChecks?.dns ?? []),
     ...(asyncChecks?.ports ?? []),
@@ -421,6 +549,12 @@ function Doctor() {
 
       <Section title="TLS">
         {tlsChecks.map((c) => (
+          <Check key={c.label} ok={c.ok} warn={c.warn} label={c.label} />
+        ))}
+      </Section>
+
+      <Section title="Network">
+        {networkChecks.map((c) => (
           <Check key={c.label} ok={c.ok} warn={c.warn} label={c.label} />
         ))}
       </Section>
@@ -475,4 +609,11 @@ function Doctor() {
 
 render(<Doctor />);
 
-export const __testing = { collectSubdomains, withTimeout, checkWorktreeConfig };
+export const __testing = {
+  collectSubdomains,
+  withTimeout,
+  checkWorktreeConfig,
+  classifyAddress,
+  describeDnsResult,
+  describeCert,
+};
