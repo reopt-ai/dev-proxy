@@ -202,6 +202,21 @@ Hostnames stay the same everywhere, so cookies, OAuth redirect URIs and CORS all
 
 In every setup, run `dev-proxy doctor`: the **Network** section shows the address other devices can use, **DNS** reports whether each hostname resolves to loopback (this machine only) or to your LAN address (reachable from the network), and **TLS** tells you whether the certificate is mkcert-issued or publicly trusted.
 
+### Peers: serve a subdomain from another machine
+
+With public DNS pointing at one machine (the **root**), a second machine can take over a subdomain without running a proxy and without anyone touching hosts files. The root routes the subdomain to the peer's app port; TLS, the inspector and every hostname stay on the root, so cookies, OAuth redirect URIs and CORS allow-lists do not change.
+
+On the root, the token is created on first start at `~/.dev-proxy/peer-token`. On the peer:
+
+```bash
+dev-proxy peer join 192.168.1.10 --token <token>          # once
+dev-proxy peer run studio --port 3001 -- pnpm dev          # claim studio while pnpm dev runs
+```
+
+`peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
+
+Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy port) only answers callers from loopback or private networks and always requires the bearer token.
+
 ### Worktree Routing
 
 dev-proxy supports git worktree-based dynamic routing. When you use `branch--app.domain` as the hostname, it routes to a per-worktree port.
@@ -399,25 +414,30 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 
 ## CLI Reference
 
-| Command                                | Description                                                                                     |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `dev-proxy`                            | Start proxy and open traffic inspector                                                          |
-| `dev-proxy init`                       | Interactive setup wizard                                                                        |
-| `dev-proxy migrate`                    | Move legacy `.dev-proxy.json` content into `.mjs` + `.dev-proxy.worktrees.json`, then delete it |
-| `dev-proxy status`                     | Show configuration and routing table                                                            |
-| `dev-proxy doctor`                     | Run environment diagnostics                                                                     |
-| `dev-proxy config`                     | View global settings                                                                            |
-| `dev-proxy config set <key> <value>`   | Modify global settings (domain, port, httpsPort)                                                |
-| `dev-proxy project add [path]`         | Register a project (default: cwd)                                                               |
-| `dev-proxy project remove <path>`      | Unregister a project                                                                            |
-| `dev-proxy project list`               | List registered projects                                                                        |
-| `dev-proxy worktree create <branch>`   | Create worktree with auto port + hooks                                                          |
-| `dev-proxy worktree destroy <branch>`  | Destroy worktree with hooks + cleanup                                                           |
-| `dev-proxy worktree add <name> <port>` | Register worktree manually (no git operations)                                                  |
-| `dev-proxy worktree remove <name>`     | Unregister worktree manually                                                                    |
-| `dev-proxy worktree list`              | List all worktrees                                                                              |
-| `dev-proxy --help`                     | Show help                                                                                       |
-| `dev-proxy --version`                  | Show version                                                                                    |
+| Command                                        | Description                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `dev-proxy`                                    | Start proxy and open traffic inspector                                                          |
+| `dev-proxy init`                               | Interactive setup wizard                                                                        |
+| `dev-proxy migrate`                            | Move legacy `.dev-proxy.json` content into `.mjs` + `.dev-proxy.worktrees.json`, then delete it |
+| `dev-proxy status`                             | Show configuration and routing table                                                            |
+| `dev-proxy doctor`                             | Run environment diagnostics                                                                     |
+| `dev-proxy config`                             | View global settings                                                                            |
+| `dev-proxy config set <key> <value>`           | Modify global settings (domain, port, httpsPort)                                                |
+| `dev-proxy project add [path]`                 | Register a project (default: cwd)                                                               |
+| `dev-proxy project remove <path>`              | Unregister a project                                                                            |
+| `dev-proxy project list`                       | List registered projects                                                                        |
+| `dev-proxy worktree create <branch>`           | Create worktree with auto port + hooks                                                          |
+| `dev-proxy worktree destroy <branch>`          | Destroy worktree with hooks + cleanup                                                           |
+| `dev-proxy worktree add <name> <port>`         | Register worktree manually (no git operations)                                                  |
+| `dev-proxy worktree remove <name>`             | Unregister worktree manually                                                                    |
+| `dev-proxy worktree list`                      | List all worktrees                                                                              |
+| `dev-proxy peer join <root> --token <t>`       | Point this machine at a root proxy                                                              |
+| `dev-proxy peer run <sub> --port <n> -- <cmd>` | Claim a subdomain while `<cmd>` runs                                                            |
+| `dev-proxy peer claim <sub> --port <n>`        | Claim a subdomain on the root                                                                   |
+| `dev-proxy peer release <sub>`                 | Release a claim                                                                                 |
+| `dev-proxy peer list`                          | List claims with owner and reachability                                                         |
+| `dev-proxy --help`                             | Show help                                                                                       |
+| `dev-proxy --version`                          | Show version                                                                                    |
 
 ## Architecture
 

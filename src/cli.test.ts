@@ -120,8 +120,8 @@ describe("KNOWN_COMMANDS", () => {
     expect(KNOWN_COMMANDS).toContain("migrate");
   });
 
-  it("has exactly 7 commands", () => {
-    expect(KNOWN_COMMANDS).toHaveLength(7);
+  it("has exactly 8 commands", () => {
+    expect(KNOWN_COMMANDS).toHaveLength(8);
   });
 });
 

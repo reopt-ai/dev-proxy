@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import * as dns from "node:dns";
 import * as net from "node:net";
-import * as os from "node:os";
 import { X509Certificate } from "node:crypto";
 import { Box, Text, render, useApp } from "ink";
 import { config, CONFIG_DIR, GLOBAL_CONFIG_PATH } from "../proxy/config.js";
@@ -15,6 +14,7 @@ import {
   type WorktreeConfig,
 } from "../cli/config-io.js";
 import { Header, Check, Section } from "../cli/output.js";
+import { getLanAddresses } from "../cli/net.js";
 
 interface CheckResult {
   ok: boolean;
@@ -180,17 +180,6 @@ function checkTlsSection(): CheckResult[] {
 }
 
 // ── Network ──────────────────────────────────────────────────
-
-/** IPv4 addresses other devices on the local network can reach this machine at. */
-function getLanAddresses(): string[] {
-  const addrs: string[] = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      if (entry.family === "IPv4" && !entry.internal) addrs.push(entry.address);
-    }
-  }
-  return addrs;
-}
 
 type AddressKind = "loopback" | "lan" | "other";
 

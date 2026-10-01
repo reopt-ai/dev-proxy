@@ -84,6 +84,14 @@ vi.mock("./certs.js", () => ({
   resolveCerts: () => null,
 }));
 
+// Never touch ~/.dev-proxy/peer-token from tests.
+vi.mock("./peers.js", () => ({
+  ensurePeerToken: () => "test-token",
+  claimPeer: vi.fn(),
+  releasePeer: vi.fn(),
+  listPeers: () => new Map(),
+}));
+
 // ── Existing utility tests ────────────────────────────────────
 
 describe("escapeHtml", () => {
@@ -416,7 +424,7 @@ describe("createRequestHandler", () => {
 
     // Proxy server with handler
     emitter = new EventEmitter();
-    const handler = createRequestHandler(emitter, "http");
+    const handler = createRequestHandler(emitter, "http", () => false);
     proxyServer = http.createServer(handler);
     proxyServer.on("upgrade", createUpgradeHandler(emitter, "http"));
     await new Promise<void>((resolve) => proxyServer.listen(0, resolve));
@@ -783,7 +791,7 @@ describe("createUpgradeHandler", () => {
 
     // Proxy server with upgrade handler
     emitter = new EventEmitter();
-    const handler = createRequestHandler(emitter, "http");
+    const handler = createRequestHandler(emitter, "http", () => false);
     proxyServer = http.createServer(handler);
     proxyServer.on("upgrade", createUpgradeHandler(emitter, "http"));
     await new Promise<void>((resolve) => proxyServer.listen(0, resolve));

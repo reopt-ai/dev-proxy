@@ -6,6 +6,7 @@ export const KNOWN_COMMANDS = [
   "project",
   "worktree",
   "migrate",
+  "peer",
 ];
 
 const args = process.argv.slice(2);
@@ -42,6 +43,9 @@ if (command === "--help" || command === "-h") {
       break;
     case "migrate":
       await import("./commands/migrate.js");
+      break;
+    case "peer":
+      await import("./commands/peer.js");
       break;
     default: {
       // Unknown command — suggest closest match

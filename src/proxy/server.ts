@@ -6,6 +6,8 @@ import tls from "node:tls";
 import { EventEmitter } from "node:events";
 import { getTarget, PROXY_PORT, HTTPS_PORT, CERT_PATH, KEY_PATH } from "./routes.js";
 import { resolveCerts } from "./certs.js";
+import { createControlHandler } from "./control.js";
+import { ensurePeerToken } from "./peers.js";
 import type { ProxyEvents, ProxyRequestEvent, ProxyWsEvent } from "./types.js";
 import { isDetailActive } from "../store.js";
 
@@ -165,8 +167,12 @@ function connectToTarget(target: URL, onConnect: () => void): net.Socket | tls.T
 function createRequestHandler(
   emitter: ProxyEmitter,
   proto: "http" | "https",
+  handleControl: (req: http.IncomingMessage, res: http.ServerResponse) => boolean,
 ): (clientReq: http.IncomingMessage, clientRes: http.ServerResponse) => void {
   return (clientReq, clientRes) => {
+    // Control API (peer claims) is answered here and never proxied.
+    if (handleControl(clientReq, clientRes)) return;
+
     const { url: target, worktree } = getTarget(clientReq.headers.host ?? "");
     const start = performance.now();
     const id = nextId();
@@ -423,8 +429,9 @@ export function createProxyServer(): {
   emitter: ProxyEmitter;
 } {
   const emitter: ProxyEmitter = new EventEmitter();
+  const handleControl = createControlHandler(ensurePeerToken());
 
-  const server = http.createServer(createRequestHandler(emitter, "http"));
+  const server = http.createServer(createRequestHandler(emitter, "http", handleControl));
   server.on("upgrade", createUpgradeHandler(emitter, "http"));
   server.on("error", (err) => {
     console.error(`[dev-proxy] HTTP server error: ${err.message}`);
@@ -438,7 +445,7 @@ export function createProxyServer(): {
       const key = fs.readFileSync(certs.keyPath);
       httpsServer = https.createServer(
         { cert, key },
-        createRequestHandler(emitter, "https"),
+        createRequestHandler(emitter, "https", handleControl),
       );
       httpsServer.on("upgrade", createUpgradeHandler(emitter, "https"));
       httpsServer.on("error", (err) => {

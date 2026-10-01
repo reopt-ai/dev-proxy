@@ -49,6 +49,10 @@ function Help() {
         {"  worktree            "}
         <Text dimColor>Manage worktree port mappings</Text>
       </Text>
+      <Text>
+        {"  peer                "}
+        <Text dimColor>Claim subdomains on the root proxy from another machine</Text>
+      </Text>
       <Text>{""}</Text>
 
       <Text bold>Options</Text>
@@ -88,6 +92,10 @@ function Help() {
       <Text>
         {"  "}
         <Text color="cyan">$ dev-proxy worktree destroy feature-auth</Text>
+      </Text>
+      <Text>
+        {"  "}
+        <Text color="cyan">$ dev-proxy peer run studio --port 3001 -- pnpm dev</Text>
       </Text>
       <Text>
         {"  "}
