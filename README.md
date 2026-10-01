@@ -116,6 +116,10 @@ Config lives in three files for new setups:
 }
 ```
 
+Optional keys:
+
+- `certPath` / `keyPath` — use your own certificate instead of the mkcert default (relative paths resolve from `~/.dev-proxy/`). See [Access from other devices](#access-from-other-devices).
+
 ### Project Routes (`dev-proxy.config.mjs`)
 
 Place a `dev-proxy.config.mjs` in each project root registered in `projects`. Routes are defined here.
@@ -180,6 +184,17 @@ The proxy listens on every interface, so a phone or a teammate's laptop on the s
 4. Set `domain` to `dev.example.com`.
 
 Keep in mind the record is public: anyone can look up that `*.dev.example.com` points at a private address, although only devices on your network can reach it.
+
+**Renewal.** Let's Encrypt certificates last 90 days. Automate the DNS-01 challenge with certbot's `--manual-auth-hook` / `--manual-cleanup-hook` (a script that adds and removes the `_acme-challenge` TXT record through your DNS provider's CLI or API) and run `certbot renew` from cron or launchd. dev-proxy watches the certificate files and swaps a renewed certificate in without a restart — including when certbot repoints the `live/*.pem` symlinks.
+
+**Sharing one service across machines.** Because the public record points at one machine, other developers get that machine's services by default. A developer who runs some apps locally overrides only those subdomains in their own `/etc/hosts` (hosts entries win over DNS) and leaves the rest alone. For example, to run `studio` locally but use the shared `id` server:
+
+```text
+127.0.0.1 studio.dev.example.com
+# no entry for id.dev.example.com → DNS → the shared machine
+```
+
+Hostnames stay the same everywhere, so cookies, OAuth redirect URIs and CORS allow-lists do not change between the shared and the local setup.
 
 **Sharing the mkcert CA instead**
 

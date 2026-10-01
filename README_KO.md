@@ -116,6 +116,10 @@ cd dev-proxy && pnpm install && pnpm proxy
 }
 ```
 
+선택 항목:
+
+- `certPath` / `keyPath` — mkcert 기본값 대신 직접 발급한 인증서를 씁니다(상대 경로는 `~/.dev-proxy/` 기준). [다른 기기에서 접근하기](#다른-기기에서-접근하기) 참고.
+
 ### 프로젝트 라우트 (`dev-proxy.config.mjs`)
 
 `projects`에 등록된 각 프로젝트 루트에 `dev-proxy.config.mjs`를 배치합니다. 라우트는 여기에 정의합니다.
@@ -180,6 +184,17 @@ mkcert가 설치되어 있으면 첫 실행 시 와일드카드 인증서를 자
 4. `domain`을 `dev.example.com`으로 바꿉니다.
 
 레코드는 공개되므로 `*.dev.example.com`이 사설 주소를 가리킨다는 사실은 누구나 조회할 수 있습니다. 다만 실제 접근은 같은 네트워크의 기기만 가능합니다.
+
+**갱신.** Let's Encrypt 인증서는 90일짜리입니다. certbot의 `--manual-auth-hook` / `--manual-cleanup-hook`(DNS 제공자의 CLI나 API로 `_acme-challenge` TXT 레코드를 넣고 지우는 스크립트)으로 DNS-01 챌린지를 자동화하고, `certbot renew`를 cron이나 launchd로 돌리세요. dev-proxy는 인증서 파일을 감시해 갱신된 인증서를 재시작 없이 교체합니다 — certbot이 `live/*.pem` 심링크를 바꾸는 경우도 포함합니다.
+
+**서비스 하나를 여러 머신이 공유하기.** 공개 레코드가 한 머신을 가리키므로, 다른 개발자는 기본적으로 그 머신의 서비스를 쓰게 됩니다. 일부 앱을 자기 머신에서 띄우는 개발자는 그 서브도메인만 자기 `/etc/hosts`에서 덮어쓰고(hosts가 DNS보다 우선) 나머지는 그대로 둡니다. 예를 들어 `studio`는 로컬에서 띄우되 `id` 서버는 공유 머신 것을 쓰려면:
+
+```text
+127.0.0.1 studio.dev.example.com
+# id.dev.example.com 은 적지 않는다 → DNS → 공유 머신
+```
+
+호스트 이름이 어디서나 같으므로 쿠키, OAuth 리다이렉트 URI, CORS 허용 목록이 공유/로컬 구성 사이에서 달라지지 않습니다.
 
 **mkcert CA를 공유하는 방법**
 
