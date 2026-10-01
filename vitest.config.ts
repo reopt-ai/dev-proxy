@@ -13,7 +13,11 @@ export default defineConfig({
         "src/index.tsx",
         "src/bootstrap.ts",
         "src/commands/**/*.tsx",
+        // peer.ts is a command too (plain console output); its arg parser is
+        // unit-tested, the network/spawn paths are exercised manually.
+        "src/commands/peer.ts",
         "src/cli/output.tsx",
+        "src/cli/net.ts",
         "src/hooks/**",
         "src/components/**",
         "src/proxy/types.ts",
