@@ -4,6 +4,9 @@ import net from "node:net";
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import type { AddressInfo } from "node:net";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { ProxyEvents, ProxyRequestEvent, ProxyWsEvent } from "./types.js";
 import { __testing } from "./server.js";
 
@@ -1121,5 +1124,41 @@ describe("startProxyServer", () => {
     await expect(result).rejects.toThrow(/already in use/);
     blocker.close();
     conflictServer.close();
+  });
+});
+
+// ── reloadCerts ───────────────────────────────────────────────
+
+describe("reloadCerts", () => {
+  const { reloadCerts } = __testing;
+
+  it("swaps the secure context with the current file contents", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dev-proxy-certs-"));
+    const certPath = path.join(dir, "cert.pem");
+    const keyPath = path.join(dir, "key.pem");
+    fs.writeFileSync(certPath, "CERT-2");
+    fs.writeFileSync(keyPath, "KEY-2");
+    const setSecureContext = vi.fn();
+
+    const ok = reloadCerts({ setSecureContext }, { certPath, keyPath });
+
+    expect(ok).toBe(true);
+    expect(setSecureContext).toHaveBeenCalledWith({
+      cert: Buffer.from("CERT-2"),
+      key: Buffer.from("KEY-2"),
+    });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps the previous context when a file cannot be read", () => {
+    const setSecureContext = vi.fn();
+
+    const ok = reloadCerts(
+      { setSecureContext },
+      { certPath: "/nonexistent/cert.pem", keyPath: "/nonexistent/key.pem" },
+    );
+
+    expect(ok).toBe(false);
+    expect(setSecureContext).not.toHaveBeenCalled();
   });
 });
