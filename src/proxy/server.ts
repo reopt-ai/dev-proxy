@@ -444,6 +444,7 @@ export function createProxyServer(): {
       httpsServer.on("error", (err) => {
         console.error(`[dev-proxy] HTTPS server error: ${err.message}`);
       });
+      watchCerts(httpsServer, certs);
     } catch (err) {
       console.error(
         `[dev-proxy] HTTPS disabled — failed to read certificates: ${(err as Error).message}`,
@@ -452,6 +453,56 @@ export function createProxyServer(): {
   }
 
   return { server, httpsServer, emitter };
+}
+
+/** How often to stat the certificate for changes (renewals are rare; keep it cheap). */
+const CERT_WATCH_INTERVAL_MS = 60_000;
+
+/**
+ * Re-read the cert/key pair and swap it into the running HTTPS server.
+ * Existing connections keep their context; new handshakes get the new one.
+ * On any failure the server keeps serving the previous certificate.
+ */
+function reloadCerts(
+  httpsServer: Pick<https.Server, "setSecureContext">,
+  certs: { certPath: string; keyPath: string },
+): boolean {
+  try {
+    const cert = fs.readFileSync(certs.certPath);
+    const key = fs.readFileSync(certs.keyPath);
+    httpsServer.setSecureContext({ cert, key });
+    console.warn("[dev-proxy] TLS certificate reloaded");
+    return true;
+  } catch (err) {
+    console.error(
+      `[dev-proxy] TLS certificate reload failed — keeping the previous one: ${(err as Error).message}`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Pick up renewed certificates without a restart (e.g. certbot replacing the
+ * files behind `live/*.pem`). `fs.watchFile` stats the path on an interval and
+ * follows symlinks, which `fs.watch` does not reliably do across platforms.
+ */
+function watchCerts(
+  httpsServer: https.Server,
+  certs: { certPath: string; keyPath: string },
+): void {
+  const onChange = (curr: fs.Stats, prev: fs.Stats) => {
+    if (curr.mtimeMs !== prev.mtimeMs || curr.ino !== prev.ino) {
+      reloadCerts(httpsServer, certs);
+    }
+  };
+  fs.watchFile(
+    certs.certPath,
+    { interval: CERT_WATCH_INTERVAL_MS, persistent: false },
+    onChange,
+  );
+  httpsServer.once("close", () => {
+    fs.unwatchFile(certs.certPath, onChange);
+  });
 }
 
 /** Destroy keep-alive agents to close lingering sockets on shutdown. */
@@ -508,6 +559,7 @@ function resetNextId(): void {
 }
 
 export const __testing = {
+  reloadCerts,
   escapeHtml,
   stripHopByHopHeaders,
   parseCookies,
