@@ -104,7 +104,7 @@ Only include the `"*"` entry if the user provided a default port in Step 2.
 
 Two special keys:
 
-- `"@"` — **apex (bare) domain**. Matches the bare domain itself (e.g. `reopt.de` with no subdomain). Use when you want the bare domain to route somewhere different from `"*"`. Optional; if absent, the bare domain falls back to `"*"`.
+- `"@"` — **apex (bare) domain**. Matches the bare domain itself (e.g. `example.dev` with no subdomain). Use when you want the bare domain to route somewhere different from `"*"`. Optional; if absent, the bare domain falls back to `"*"`.
 - `"*"` — **wildcard**. Matches any subdomain that doesn't have an explicit entry.
 
 > **Why `.mjs`?** dev-proxy is ESM-only. `.mjs` works in any project regardless of the package's `"type"` field. `dev-proxy.config.js` is also accepted (used when `package.json` has `"type": "module"`); `.mjs` takes precedence if both exist.
@@ -237,6 +237,8 @@ sudo apt install mkcert && mkcert -install
 ```
 
 dev-proxy automatically generates wildcard TLS certificates on first run when mkcert is available. No manual cert creation needed.
+
+To use a certificate you issued yourself (for example a Let's Encrypt wildcard so other devices trust it), set `certPath` and `keyPath` in `~/.dev-proxy/config.json`. See [Access from other devices](../../README.md#access-from-other-devices) in the README for the full setup.
 
 ## Step 6: Verify Installation
 

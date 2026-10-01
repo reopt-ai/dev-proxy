@@ -9,3 +9,6 @@ certs/
 reference/
 worktrunk
 worktrunk
+
+# local tool link files
+.reopt-qa.json

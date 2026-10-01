@@ -5,7 +5,7 @@ import { getWorktreeTarget } from "./worktrees.js";
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
-/** Sentinel route key for the apex (bare) domain — e.g. `reopt.de` itself. */
+/** Sentinel route key for the apex (bare) domain — e.g. `example.dev` itself. */
 export const APEX_KEY = "@";
 
 // ── Helpers ──────────────────────────────────────────────────

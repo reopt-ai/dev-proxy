@@ -45,6 +45,14 @@ vi.mock("node:net", () => ({
   createConnection: vi.fn(),
 }));
 
+vi.mock("node:os", () => ({
+  networkInterfaces: vi.fn(() => ({})),
+}));
+
+vi.mock("node:crypto", () => ({
+  X509Certificate: vi.fn(),
+}));
+
 // Mock ink to prevent rendering side effects
 vi.mock("ink", () => ({
   render: vi.fn(),
@@ -59,7 +67,14 @@ vi.mock("react", () => ({
 }));
 
 const { __testing } = await import("./doctor.js");
-const { collectSubdomains, withTimeout, checkWorktreeConfig } = __testing;
+const {
+  collectSubdomains,
+  withTimeout,
+  checkWorktreeConfig,
+  classifyAddress,
+  describeDnsResult,
+  describeCert,
+} = __testing;
 
 // ── Lifecycle ──────────────────────────────────────────────
 
@@ -491,5 +506,106 @@ describe("checkWorktreeConfig", () => {
     const results = checkWorktreeConfig(projects);
     const wildcardWarn = results.filter((r) => !r.ok && r.label.includes('service "*"'));
     expect(wildcardWarn).toHaveLength(0);
+  });
+});
+
+// ── classifyAddress / describeDnsResult ────────────────────
+
+describe("classifyAddress", () => {
+  const lan = ["192.168.1.10", "10.0.0.5"];
+
+  it("treats any 127.x address as loopback", () => {
+    expect(classifyAddress("127.0.0.1", lan)).toBe("loopback");
+    expect(classifyAddress("127.0.1.1", lan)).toBe("loopback");
+  });
+
+  it("recognises this machine's LAN addresses", () => {
+    expect(classifyAddress("192.168.1.10", lan)).toBe("lan");
+    expect(classifyAddress("10.0.0.5", lan)).toBe("lan");
+  });
+
+  it("flags anything else as other", () => {
+    expect(classifyAddress("192.168.1.11", lan)).toBe("other");
+    expect(classifyAddress("203.0.113.7", [])).toBe("other");
+  });
+});
+
+describe("describeDnsResult", () => {
+  const lan = ["192.168.1.10"];
+
+  it("passes for loopback and says it is local only", () => {
+    const r = describeDnsResult("app.test.dev", "127.0.0.1", lan);
+    expect(r.ok).toBe(true);
+    expect(r.label).toContain("this machine only");
+  });
+
+  it("passes for a LAN address and says it is reachable from the network", () => {
+    const r = describeDnsResult("app.test.dev", "192.168.1.10", lan);
+    expect(r.ok).toBe(true);
+    expect(r.label).toContain("reachable from your network");
+  });
+
+  it("warns when the name resolves elsewhere", () => {
+    const r = describeDnsResult("app.test.dev", "203.0.113.7", lan);
+    expect(r.ok).toBe(false);
+    expect(r.warn).toBe(true);
+    expect(r.label).toContain("203.0.113.7");
+  });
+});
+
+// ── describeCert ───────────────────────────────────────────
+
+describe("describeCert", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+  const days = (n: number) => new Date(now + n * 24 * 60 * 60 * 1000).toUTCString();
+
+  function cert(overrides: Partial<Parameters<typeof describeCert>[0]> = {}) {
+    return {
+      issuer: "C=US\nO=Example CA\nCN=Example Root",
+      validTo: days(90),
+      checkHost: vi.fn(() => "ok"),
+      ...overrides,
+    };
+  }
+
+  it("reports the issuer CN, host coverage and validity", () => {
+    const results = describeCert(cert(), "test.dev", now);
+    expect(results.map((r) => r.ok)).toEqual([true, true, true]);
+    expect(results[0]?.label).toBe("issued by Example Root");
+    expect(results[1]?.label).toBe("covers *.test.dev and test.dev");
+    expect(results[2]?.label).toBe("valid until 2026-04-01");
+  });
+
+  it("notes that mkcert certs are trusted on this machine only", () => {
+    const results = describeCert(
+      cert({ issuer: "O=mkcert development CA\nCN=mkcert dev@host" }),
+      "test.dev",
+      now,
+    );
+    expect(results[0]?.ok).toBe(true);
+    expect(results[0]?.label).toContain("install its root CA on other devices");
+  });
+
+  it("fails coverage when the wildcard does not match", () => {
+    const checkHost = vi.fn((name: string) =>
+      name === "test.dev" ? "test.dev" : undefined,
+    );
+    const results = describeCert(cert({ checkHost }), "test.dev", now);
+    expect(results[1]?.ok).toBe(false);
+    expect(results[1]?.label).toContain("does not cover");
+  });
+
+  it("warns when the cert expires within 14 days", () => {
+    const results = describeCert(cert({ validTo: days(5) }), "test.dev", now);
+    expect(results[2]?.ok).toBe(false);
+    expect(results[2]?.warn).toBe(true);
+    expect(results[2]?.label).toContain("renew soon");
+  });
+
+  it("fails when the cert has expired", () => {
+    const results = describeCert(cert({ validTo: days(-1) }), "test.dev", now);
+    expect(results[2]?.ok).toBe(false);
+    expect(results[2]?.warn).toBeUndefined();
+    expect(results[2]?.label).toContain("expired");
   });
 });
