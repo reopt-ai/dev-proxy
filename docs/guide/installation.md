@@ -238,7 +238,7 @@ sudo apt install mkcert && mkcert -install
 
 dev-proxy automatically generates wildcard TLS certificates on first run when mkcert is available. No manual cert creation needed.
 
-To use a certificate you issued yourself (for example a Let's Encrypt wildcard so other devices trust it), set `certPath` and `keyPath` in `~/.dev-proxy/config.json`. See [Access from other devices](../../README.md#access-from-other-devices) in the README for the full setup.
+To use a certificate you issued yourself (for example a Let's Encrypt wildcard so other devices trust it), set `certPath` and `keyPath` in `~/.dev-proxy/config.json`. Renewed files are picked up without a restart. See [Access from other devices](../../README.md#access-from-other-devices) in the README for the full setup.
 
 ## Step 6: Verify Installation
 
