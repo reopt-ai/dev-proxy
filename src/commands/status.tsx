@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { Box, Text, render } from "ink";
 import { config } from "../proxy/config.js";
+import { loadPeers, listPeers } from "../proxy/peers.js";
 import { Header, Section, Row, RouteRow, ExitOnRender } from "../cli/output.js";
 
 function formatTarget(target: string): string {
@@ -47,6 +48,9 @@ function Status() {
 
   const multiProject = config.projects.length > 1;
 
+  loadPeers();
+  const peers = [...listPeers().entries()];
+
   return (
     <Box flexDirection="column">
       <ExitOnRender />
@@ -81,6 +85,18 @@ function Status() {
           <Text key={p.path}>{`    ${p.path}`}</Text>
         ))}
       </Section>
+
+      {peers.length > 0 && (
+        <Section title={`Peers (${String(peers.length)})`}>
+          {peers.map(([sub, entry]) => (
+            <RouteRow
+              key={sub}
+              sub={sub}
+              target={`${formatTarget(entry.target)}  ${entry.owner}`}
+            />
+          ))}
+        </Section>
+      )}
 
       <Section title={`Worktrees (${String(allWorktrees.length)})`}>
         {allWorktrees.map((w) =>

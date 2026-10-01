@@ -44,6 +44,16 @@ const mockConfig: ResolvedConfig = {
 
 vi.mock("./config.js", () => ({
   config: mockConfig,
+  CONFIG_DIR: "/mock/.dev-proxy",
+}));
+
+const mockPeers = new Map<string, { target: string; owner: string }>();
+vi.mock("./peers.js", () => ({
+  getPeerTarget: (sub: string) => {
+    const p = mockPeers.get(sub);
+    return p ? new URL(p.target) : null;
+  },
+  getPeer: (sub: string) => mockPeers.get(sub),
 }));
 
 // Now import after mocks are in place
@@ -335,6 +345,38 @@ describe("route parsing — invalid targets", () => {
 // ── getTarget edge cases ───────────────────────────────────
 
 describe("getTarget", () => {
+  it("prefers a peer claim over the local route and reports the owner", () => {
+    mockPeers.set("studio", { target: "http://192.168.1.20:4000", owner: "box-b" });
+    try {
+      const result = getTarget("studio.test.dev:3000");
+      expect(result.url?.origin).toBe("http://192.168.1.20:4000");
+      expect(result.peer).toBe("box-b");
+      expect(result.worktree).toBeNull();
+    } finally {
+      mockPeers.clear();
+    }
+  });
+
+  it("peer claims also cover subdomains that would otherwise hit the wildcard", () => {
+    mockPeers.set("docs", { target: "http://192.168.1.20:4100", owner: "box-b" });
+    try {
+      expect(getTarget("docs.test.dev").url?.origin).toBe("http://192.168.1.20:4100");
+    } finally {
+      mockPeers.clear();
+    }
+  });
+
+  it("worktree hosts bypass peer claims", () => {
+    mockPeers.set("studio", { target: "http://192.168.1.20:4000", owner: "box-b" });
+    try {
+      const result = getTarget("feat--studio.test.dev");
+      expect(result.worktree).toBe("feat");
+      expect(result.peer).toBeNull();
+    } finally {
+      mockPeers.clear();
+    }
+  });
+
   it("resolves known subdomain to correct target URL", () => {
     const result = getTarget("studio.test.dev:3000");
     expect(result.url).not.toBeNull();

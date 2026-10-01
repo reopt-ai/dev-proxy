@@ -8,6 +8,11 @@ vi.mock("ink", () => ({
 }));
 vi.mock("../proxy/config.js", () => ({
   config: { domain: "test.local", port: 80, httpsPort: 443, projects: [] },
+  CONFIG_DIR: "/mock/.dev-proxy",
+}));
+vi.mock("../proxy/peers.js", () => ({
+  loadPeers: vi.fn(),
+  listPeers: () => new Map(),
 }));
 vi.mock("../cli/output.js", () => ({
   Header: () => null,

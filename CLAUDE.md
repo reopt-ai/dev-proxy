@@ -41,7 +41,7 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 
 **Config**: `~/.dev-proxy/config.json` (global: domain, ports, TLS, `projects` array) → each project's `dev-proxy.config.mjs` (routes + `worktreeConfig`) plus `.dev-proxy.worktrees.json` (CLI-managed worktree instance map). Legacy `.dev-proxy.json` (pre-`migrate`) is still read as a fallback for both `routes` and `worktreeConfig` — the mjs file wins when both define the same key, and `dev-proxy migrate` deletes the legacy file once everything has moved. No cwd-based search — projects are explicitly registered.
 
-**Routing**: `host.split(".")[0]` extracts subdomain → exact match in merged routes → `"*"` wildcard fallback → `null` (502). Worktree syntax: `branch--app.domain` → lookup in project worktrees → unregistered = offline error page (no silent fallback).
+**Routing**: `host.split(".")[0]` extracts subdomain → peer claim (`~/.dev-proxy/peers.json`, see `src/proxy/peers.ts`) → exact match in merged routes → `"*"` wildcard fallback → `null` (502). Worktree syntax: `branch--app.domain` → lookup in project worktrees → unregistered = offline error page (no silent fallback).
 
 ## Critical Invariants
 
@@ -60,6 +60,8 @@ Split happens at store ingress (`pushHttp`/`pushWs`). Events are immutable after
 All subcommands are Ink components in `src/commands/`. Shared output primitives (`Header`, `Section`, `Check`, `Row`) in `src/cli/output.tsx`. Shared config I/O and port allocation in `src/cli/config-io.ts`. Routing in `src/cli.ts` (process.argv, no framework). Unknown commands suggest closest match via Levenshtein distance.
 
 `worktree create/destroy` — full lifecycle (git worktree + multi-port allocation + .env.local generation + hooks). `worktree add/remove` — manual single-port registration only. `worktreeConfig.services` maps subdomains to env variable names; `worktree create` allocates one port per service and writes `.env.local`. Worktree entry type is `{ ports: Record<string, number> }` (multi) or `{ port: number }` (legacy). Use `getServicePort(entry, service)` for routing, `getEntryPorts(entry)` for all ports.
+
+`peer` — control API client (`src/cli/peer-client.ts`) for the root's `/_dev-proxy/peers` endpoints (`src/proxy/control.ts`). Plain console output, not Ink, because `peer run` hands the terminal to the wrapped dev server.
 
 To add a new command: create `src/commands/<name>.tsx`, add case to `src/cli.ts`, update help.tsx.
 

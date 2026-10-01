@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import { useSyncExternalStore } from "react";
 import { config } from "./config.js";
 import { getWorktreeTarget } from "./worktrees.js";
+import { getPeer, getPeerTarget } from "./peers.js";
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
@@ -140,6 +141,8 @@ export const DOMAIN = config.domain;
 export interface TargetResult {
   url: URL | null;
   worktree: string | null;
+  /** Owner label when the subdomain is served by a peer machine. */
+  peer: string | null;
 }
 
 export function parseHost(host: string): {
@@ -167,9 +170,14 @@ export function getTarget(host: string): TargetResult {
   const { app, worktree } = parseHost(host);
   if (worktree) {
     const target = getWorktreeTarget(worktree, app);
-    return { url: target, worktree };
+    return { url: target, worktree, peer: null };
   }
-  return { url: parsedRoutes.get(app) ?? wildcardTarget, worktree: null };
+  // A peer claim takes precedence over the local route for the same subdomain.
+  const peerTarget = getPeerTarget(app);
+  if (peerTarget) {
+    return { url: peerTarget, worktree: null, peer: getPeer(app)?.owner ?? null };
+  }
+  return { url: parsedRoutes.get(app) ?? wildcardTarget, worktree: null, peer: null };
 }
 
 // ── React subscription (useSyncExternalStore) ───────────────

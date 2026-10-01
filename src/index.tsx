@@ -12,11 +12,13 @@ import {
 } from "./proxy/config.js";
 import { rebuildRoutes } from "./proxy/routes.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
+import { loadPeers, startPeerProbes, stopPeerProbes, PEERS_PATH } from "./proxy/peers.js";
 import { createProxyServer, startProxyServer, destroyAgents } from "./proxy/server.js";
 import { pushHttp, pushWs } from "./store.js";
 import { App } from "./components/app.js";
 
 loadRegistry();
+loadPeers();
 
 const { server, httpsServer, emitter } = createProxyServer();
 let shuttingDown = false;
@@ -132,6 +134,23 @@ function onConfigChange(): void {
   }, 150);
 }
 
+let peersDebounce: ReturnType<typeof setTimeout> | null = null;
+function watchPeersFile(): void {
+  try {
+    const w = watch(dirname(PEERS_PATH), (_event, filename) => {
+      if (filename !== basename(PEERS_PATH)) return;
+      if (peersDebounce) clearTimeout(peersDebounce);
+      peersDebounce = setTimeout(loadPeers, 150);
+    });
+    w.on("error", () => {
+      /* intentional: watcher errors are non-fatal */
+    });
+    configWatchers.push(w);
+  } catch {
+    /* directory doesn't exist — skip */
+  }
+}
+
 function watchFile(dir: string, base: string): void {
   try {
     const w = watch(dir, (_event, filename) => {
@@ -148,6 +167,11 @@ function watchFile(dir: string, base: string): void {
 
 // Watch global config
 watchFile(dirname(GLOBAL_CONFIG_PATH), basename(GLOBAL_CONFIG_PATH));
+
+// Peer claims: the control API updates the in-memory registry directly, but
+// the file can also be edited by hand or by another root process.
+watchPeersFile();
+startPeerProbes();
 
 // Watch each project config (primary config file + worktrees state file)
 for (const project of config.projects) {
@@ -174,7 +198,9 @@ function shutdown(code = 0, reason?: string) {
 
   for (const w of configWatchers) w.close();
   if (configDebounce) clearTimeout(configDebounce);
+  if (peersDebounce) clearTimeout(peersDebounce);
   stopRegistry();
+  stopPeerProbes();
   try {
     app.unmount();
   } catch {

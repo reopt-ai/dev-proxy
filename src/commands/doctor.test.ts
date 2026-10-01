@@ -45,8 +45,8 @@ vi.mock("node:net", () => ({
   createConnection: vi.fn(),
 }));
 
-vi.mock("node:os", () => ({
-  networkInterfaces: vi.fn(() => ({})),
+vi.mock("../cli/net.js", () => ({
+  getLanAddresses: () => [],
 }));
 
 vi.mock("node:crypto", () => ({

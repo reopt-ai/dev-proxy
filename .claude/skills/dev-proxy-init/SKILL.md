@@ -3,10 +3,11 @@ name: dev-proxy-init
 description: |
   Set up @reopt-ai/dev-proxy for any project. Detects project structure,
   frameworks, and services, then generates config files and guides DNS/TLS
-  setup. Triggers on: "setup dev-proxy", "dev-proxy init", "dev-proxy setup",
-  "configure dev-proxy", "add dev-proxy", "initialize dev-proxy".
+  setup. Also joins a machine to an existing root proxy as a peer. Triggers on:
+  "setup dev-proxy", "dev-proxy init", "dev-proxy setup", "configure dev-proxy",
+  "add dev-proxy", "initialize dev-proxy", "dev-proxy peer", "join dev-proxy".
 metadata:
-  verified-against: "@reopt-ai/dev-proxy >= 1.2.0"
+  verified-against: "@reopt-ai/dev-proxy >= 1.9.0"
 ---
 
 # dev-proxy-init Skill
@@ -331,6 +332,41 @@ Always explain to the user why this is needed before modifying their
 
 ---
 
+## Phase 3.5: Peer mode (shared dev domain)
+
+Use this instead of Phases 4–5 when another machine already runs the proxy and
+public DNS for the dev domain points at it (the **root**). This machine then
+needs no proxy, no DNS and no certificate — it only claims the subdomains it
+serves.
+
+1. Ask the user for the root's LAN address and the token from
+   `~/.dev-proxy/peer-token` on the root (never guess the token; never print
+   it back in full).
+2. Join once:
+
+   ```bash
+   dev-proxy peer join <root-ip> --token <token>
+   dev-proxy peer list          # proves the connection; shows current claims
+   ```
+
+3. For each app this machine will run, wrap its dev script so the claim lives
+   exactly as long as the dev server:
+
+   ```json
+   "dev": "dev-proxy peer run <subdomain> --port <port> -- next dev -H 0.0.0.0 --port <port>"
+   ```
+
+   The app **must bind to `0.0.0.0`** (the root reaches it over the LAN). This
+   is the one case where editing `package.json` is allowed — confirm first.
+
+4. Do not add hosts-file entries for claimed subdomains; the root's DNS already
+   resolves them and a hosts override would bypass the claim.
+5. Explain the rules: last claim wins (the previous owner is shown), the root
+   drops a claim unreachable for 10 minutes, `dev-proxy peer release <sub>`
+   gives a subdomain back manually.
+
+Skip the rest of this skill for peer machines.
+
 ## Phase 4: DNS Setup
 
 **Skip this entire phase if domain is `localhost`.** Browsers resolve
@@ -475,5 +511,5 @@ dev-proxy setup complete!
 - Both files should be **committed to git** — they are shared project configuration teammates need
 - Never create `.dev-proxy.json` for new setups — it is a read-only legacy fallback that `dev-proxy migrate` removes
 - If the project already has a `.dev-proxy.json`, suggest running `dev-proxy migrate` — it moves `routes` and `worktreeConfig` into `dev-proxy.config.mjs`, `worktrees` into `.dev-proxy.worktrees.json`, and deletes the legacy file
-- Never modify the user's application code, `.env` files, or `package.json`
+- Never modify the user's application code, `.env` files, or `package.json` — except wrapping a `dev` script with `dev-proxy peer run` in peer mode, after confirmation
 - Always confirm the proposed route map before writing any files
