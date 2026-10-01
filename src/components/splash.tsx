@@ -1,16 +1,26 @@
 import { Box, Text } from "ink";
 import { APEX_KEY, useRouteSnapshot, PROXY_PORT, HTTPS_PORT } from "../proxy/routes.js";
 import { useWorktrees } from "../proxy/worktrees.js";
+import { usePeers, type PeerEntry } from "../proxy/peers.js";
 import { palette } from "../utils/format.js";
+
+function peerStatusColor(status: PeerEntry["status"]): string {
+  if (status === "ok") return palette.success;
+  if (status === "unreachable") return palette.error;
+  return palette.muted;
+}
 
 function RouteEntry({
   sub,
   target,
   domain,
+  peer,
 }: {
   sub: string;
   target: string;
   domain: string;
+  /** Set when a peer machine has claimed this subdomain — it overrides `target`. */
+  peer?: PeerEntry;
 }) {
   // The apex key matches the bare domain \u2014 render it as `domain` rather than
   // `@.domain`, which would not be a valid host the user types.
@@ -19,7 +29,15 @@ function RouteEntry({
     <Box gap={1}>
       <Text color={palette.brand}>{host.padEnd(22)}</Text>
       <Text color={palette.subtle}>{"\u279C"}</Text>
-      <Text color={palette.dim}>{target}</Text>
+      {peer ? (
+        <>
+          <Text color={palette.text}>{peer.target}</Text>
+          <Text color={peerStatusColor(peer.status)}>{`\u25CF ${peer.owner}`}</Text>
+          <Text color={palette.muted}>{`(was ${target})`}</Text>
+        </>
+      ) : (
+        <Text color={palette.dim}>{target}</Text>
+      )}
     </Box>
   );
 }
@@ -29,6 +47,11 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
   const sorted = Object.entries(routes).sort(([a], [b]) => a.localeCompare(b));
   const multiProject = byProject.length > 1;
   const worktrees = useWorktrees();
+  const peers = usePeers();
+  // Claims for subdomains that have no local route still need a line.
+  const peerOnly = [...peers.entries()]
+    .filter(([sub]) => !(sub in routes))
+    .sort(([a], [b]) => a.localeCompare(b));
   const line = "─".repeat(44);
 
   return (
@@ -64,13 +87,39 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
                   {Object.entries(g.routes)
                     .sort(([a], [b]) => a.localeCompare(b))
                     .map(([sub, target]) => (
-                      <RouteEntry key={sub} sub={sub} target={target} domain={domain} />
+                      <RouteEntry
+                        key={sub}
+                        sub={sub}
+                        target={target}
+                        domain={domain}
+                        peer={peers.get(sub)}
+                      />
                     ))}
                 </Box>
               ))
             : sorted.map(([sub, target]) => (
-                <RouteEntry key={sub} sub={sub} target={target} domain={domain} />
+                <RouteEntry
+                  key={sub}
+                  sub={sub}
+                  target={target}
+                  domain={domain}
+                  peer={peers.get(sub)}
+                />
               ))}
+          {peerOnly.length > 0 && (
+            <Box flexDirection="column">
+              {multiProject && <Text color={palette.muted}>[peers]</Text>}
+              {peerOnly.map(([sub, entry]) => (
+                <RouteEntry
+                  key={sub}
+                  sub={sub}
+                  target={defaultTarget ?? "no route"}
+                  domain={domain}
+                  peer={entry}
+                />
+              ))}
+            </Box>
+          )}
           {defaultTarget && (
             <Box gap={1}>
               <Text color={palette.muted}>{`*.${domain}`.padEnd(22)}</Text>
