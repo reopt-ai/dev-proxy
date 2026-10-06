@@ -11,6 +11,15 @@ vi.mock("./peers.js", () => ({
   listPeers: () => peers,
   probePeers: () => Promise.resolve(),
 }));
+const requestPairing = vi.fn();
+const pairingStatus = vi.fn();
+const deviceTokens = new Map<string, string>();
+vi.mock("./pairing.js", () => ({
+  requestPairing: (...args: unknown[]) => requestPairing(...args) as unknown,
+  pairingStatus: (...args: unknown[]) => pairingStatus(...args) as unknown,
+  deviceIdForToken: (token: string) => deviceTokens.get(token) ?? null,
+  pairCode: () => "ABC-123",
+}));
 vi.mock("./config.js", () => ({ config: { domain: "test.dev" } }));
 
 const { createControlHandler, isPrivateAddress, isControlPath } =
@@ -37,6 +46,9 @@ afterAll(() => {
 beforeEach(() => {
   claimPeer.mockReset();
   releasePeer.mockReset();
+  requestPairing.mockReset();
+  pairingStatus.mockReset();
+  deviceTokens.clear();
   peers.clear();
 });
 
@@ -143,7 +155,12 @@ describe("control API", () => {
       body: { target: "http://192.168.1.20:3001", owner: "b" },
     });
     expect(res.status).toBe(200);
-    expect(claimPeer).toHaveBeenCalledWith("studio", "http://192.168.1.20:3001", "b");
+    expect(claimPeer).toHaveBeenCalledWith(
+      "studio",
+      "http://192.168.1.20:3001",
+      "b",
+      undefined,
+    );
   });
 
   it("returns 400 when the registry rejects the claim or the body is not JSON", async () => {
@@ -169,7 +186,7 @@ describe("control API", () => {
       token: TOKEN,
       body: { target: { a: 1 }, owner: 5 },
     });
-    expect(claimPeer).toHaveBeenCalledWith("studio", "", "");
+    expect(claimPeer).toHaveBeenCalledWith("studio", "", "", undefined);
   });
 
   it("releases a claim and reports 404 when there was none", async () => {
@@ -190,5 +207,69 @@ describe("control API", () => {
     expect(
       (await call("POST", "/_dev-proxy/peers/studio", { token: TOKEN })).status,
     ).toBe(405);
+  });
+
+  it("accepts the token of a paired machine and records it on its claims", async () => {
+    deviceTokens.set("device-token", "dev1");
+    expect(
+      (await call("GET", "/_dev-proxy/peers", { token: "device-token" })).status,
+    ).toBe(200);
+
+    claimPeer.mockReturnValue({ ok: true, replaced: null });
+    await call("PUT", "/_dev-proxy/peers/studio", {
+      token: "device-token",
+      body: { target: "http://192.168.1.20:3001", owner: "b" },
+    });
+    expect(claimPeer).toHaveBeenCalledWith(
+      "studio",
+      "http://192.168.1.20:3001",
+      "b",
+      "dev1",
+    );
+  });
+
+  it("refuses requests that carry a browser Origin, even with a valid token", async () => {
+    const res = await fetch(`${base}/_dev-proxy/peers`, {
+      headers: { Authorization: `Bearer ${TOKEN}`, Origin: "http://evil.example" },
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("pairing endpoints", () => {
+  it("queues a pair request without a token and returns its id and code", async () => {
+    requestPairing.mockReturnValue({
+      ok: true,
+      request: { id: "req1", tokenHash: "h" },
+    });
+    const res = await call("POST", "/_dev-proxy/pair", {
+      body: { name: "box-b", tokenHash: "h" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ id: "req1", code: "ABC-123", domain: "test.dev" });
+    expect(requestPairing).toHaveBeenCalledWith("box-b", "127.0.0.1", "h");
+  });
+
+  it("passes on the registry's refusal", async () => {
+    requestPairing.mockReturnValue({ ok: false, status: 429, error: "too many" });
+    const res = await call("POST", "/_dev-proxy/pair", { body: {} });
+    expect(res.status).toBe(429);
+    expect(res.json?.error).toBe("too many");
+    expect(requestPairing).toHaveBeenCalledWith("", "127.0.0.1", "");
+  });
+
+  it("reports status only to a caller presenting a token", async () => {
+    pairingStatus.mockReturnValue("pending");
+    expect((await call("GET", "/_dev-proxy/pair/req1")).status).toBe(401);
+
+    const res = await call("GET", "/_dev-proxy/pair/req1", { token: "peer-token" });
+    expect(res.json).toEqual({ status: "pending", domain: "test.dev" });
+    expect(pairingStatus).toHaveBeenCalledWith("req1", "peer-token");
+  });
+
+  it("rejects other methods and deeper paths", async () => {
+    expect((await call("DELETE", "/_dev-proxy/pair/req1")).status).toBe(405);
+    expect((await call("GET", "/_dev-proxy/pair")).status).toBe(405);
+    expect((await call("GET", "/_dev-proxy/pair/req1/extra")).status).toBe(401);
   });
 });

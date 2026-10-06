@@ -8,6 +8,8 @@ import { StatusBar } from "./status-bar.js";
 import { RequestList } from "./request-list.js";
 import { DetailPanel } from "./detail-panel.js";
 import { FooterBar } from "./footer-bar.js";
+import { PairPrompt } from "./pair-prompt.js";
+import { approvePairing, denyPairing, usePairRequests } from "../proxy/pairing.js";
 import { HTTPS_PORT, PROXY_PORT } from "../proxy/routes.js";
 import { palette } from "../utils/format.js";
 import { useMouse } from "../hooks/use-mouse.js";
@@ -345,6 +347,11 @@ export function App({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
   const [focus, setFocus] = useState<"list" | "detail">("list");
   const [showDetail, setShowDetail] = useState(true);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pairRequests = usePairRequests();
+  const pairRequest = pairRequests[0];
+  // Approving hands out a credential, so one stray keypress must not be enough.
+  const [pairConfirmId, setPairConfirmId] = useState<string | null>(null);
+  const pairConfirming = pairConfirmId !== null && pairConfirmId === pairRequest?.id;
 
   const { stdout } = useStdout();
   const [termSize, setTermSize] = useState({
@@ -412,6 +419,23 @@ export function App({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
   useInput((input, key) => {
     if (input.includes(MOUSE_PREFIX)) return;
     const lowerInput = input.toLowerCase();
+
+    // ── Pair request ── answerable from every screen, except while typing a filter
+    if (pairRequest && !searchMode) {
+      if (pairConfirming) {
+        setPairConfirmId(null);
+        if (lowerInput === "y") approvePairing(pairRequest.id);
+        return;
+      }
+      if (lowerInput === "a") {
+        setPairConfirmId(pairRequest.id);
+        return;
+      }
+      if (lowerInput === "d") {
+        denyPairing(pairRequest.id);
+        return;
+      }
+    }
 
     // ── Splash gate ──
     if (showSplash) {
@@ -551,31 +575,45 @@ export function App({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
     }
   });
 
+  // The prompt takes the bottom row so the views' mouse coordinates stay valid.
+  const viewSize = pairRequest ? { ...termSize, rows: termSize.rows - 1 } : termSize;
+
+  let view: React.ReactNode;
   if (showSplash) {
-    return (
+    view = (
       <Box flexDirection="column" flexGrow={1}>
-        <StatusBar termSize={termSize} httpsEnabled={httpsEnabled} />
+        <StatusBar termSize={viewSize} httpsEnabled={httpsEnabled} />
         <Splash httpsEnabled={httpsEnabled} />
       </Box>
     );
+  } else if (!inspectMode) {
+    view = <StandbyView termSize={viewSize} httpsEnabled={httpsEnabled} />;
+  } else {
+    view = (
+      <InspectView
+        httpsEnabled={httpsEnabled}
+        termSize={viewSize}
+        searchMode={searchMode}
+        searchInput={searchInput}
+        detailScroll={detailScroll}
+        onDetailScrollChange={setDetailScroll}
+        onSelectionChange={resetDetailScroll}
+        focus={focus}
+        showDetail={showDetail}
+        noteActivity={noteInspectActivity}
+      />
+    );
   }
 
-  if (!inspectMode) {
-    return <StandbyView termSize={termSize} httpsEnabled={httpsEnabled} />;
-  }
-
+  if (!pairRequest) return view;
   return (
-    <InspectView
-      httpsEnabled={httpsEnabled}
-      termSize={termSize}
-      searchMode={searchMode}
-      searchInput={searchInput}
-      detailScroll={detailScroll}
-      onDetailScrollChange={setDetailScroll}
-      onSelectionChange={resetDetailScroll}
-      focus={focus}
-      showDetail={showDetail}
-      noteActivity={noteInspectActivity}
-    />
+    <Box flexDirection="column" flexGrow={1}>
+      {view}
+      <PairPrompt
+        request={pairRequest}
+        more={pairRequests.length - 1}
+        confirming={pairConfirming}
+      />
+    </Box>
   );
 }

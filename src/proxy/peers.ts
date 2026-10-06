@@ -32,6 +32,8 @@ export interface PeerClaim {
   owner: string;
   /** Epoch ms when the claim was made (or last re-asserted). */
   since: number;
+  /** Id of the paired machine that made the claim; absent for the root's own token. */
+  device?: string;
 }
 
 export type PeerStatus = "unknown" | "ok" | "unreachable";
@@ -82,7 +84,8 @@ function isClaim(value: unknown): value is PeerClaim {
     typeof v.target === "string" &&
     parsePeerTarget(v.target) !== null &&
     typeof v.owner === "string" &&
-    typeof v.since === "number"
+    typeof v.since === "number" &&
+    (v.device === undefined || typeof v.device === "string")
   );
 }
 
@@ -103,6 +106,7 @@ function readPeersFile(): Map<string, PeerEntry> {
           target: claim.target,
           owner: claim.owner,
           since: claim.since,
+          device: claim.device,
           status: unchanged ? prev.status : "unknown",
           unreachableSince: unchanged ? prev.unreachableSince : undefined,
         });
@@ -117,7 +121,12 @@ function readPeersFile(): Map<string, PeerEntry> {
 function writePeersFile(): void {
   const data: Record<string, PeerClaim> = {};
   for (const [sub, entry] of peers) {
-    data[sub] = { target: entry.target, owner: entry.owner, since: entry.since };
+    data[sub] = {
+      target: entry.target,
+      owner: entry.owner,
+      since: entry.since,
+      device: entry.device,
+    };
   }
   mkdirSync(CONFIG_DIR, { recursive: true });
   // Write-then-rename so a concurrent reader never sees a partial file.
@@ -157,6 +166,7 @@ export function claimPeer(
   subdomain: string,
   target: string,
   owner: string,
+  device?: string,
 ): ClaimResult | { ok: false; error: string } {
   if (!isValidPeerSubdomain(subdomain)) {
     return { ok: false, error: `invalid subdomain "${subdomain}"` };
@@ -177,6 +187,7 @@ export function claimPeer(
     target: url.origin,
     owner: owner.trim(),
     since: Date.now(),
+    device,
     status: "unknown",
   });
   writePeersFile();
@@ -189,6 +200,22 @@ export function releasePeer(subdomain: string): boolean {
   writePeersFile();
   notify();
   return true;
+}
+
+/** Drop every claim made by these paired machines. Returns the subdomains released. */
+export function releasePeersOfDevices(deviceIds: ReadonlySet<string>): string[] {
+  const released: string[] = [];
+  for (const [sub, entry] of peers) {
+    if (entry.device !== undefined && deviceIds.has(entry.device)) {
+      peers.delete(sub);
+      released.push(sub);
+    }
+  }
+  if (released.length > 0) {
+    writePeersFile();
+    notify();
+  }
+  return released;
 }
 
 // ── Health probing ───────────────────────────────────────────

@@ -9,14 +9,18 @@ import {
   releasePeer,
   type PeerEntry,
 } from "./peers.js";
+import { deviceIdForToken, pairCode, pairingStatus, requestPairing } from "./pairing.js";
 
 /**
  * Control API served by the root proxy under `/_dev-proxy/`.
  *
  * Peers on the LAN use it to claim and release subdomains (see `peer` CLI).
- * Every request needs the root's bearer token and must come from a loopback
- * or private address — this is a dev tool, not an internet-facing API.
+ * Every request must come from a loopback or private address — this is a dev
+ * tool, not an internet-facing API — and, apart from pairing, needs a bearer
+ * token: the root's own, or one a paired machine had approved (see pairing.ts).
  *
+ *   POST   /_dev-proxy/pair           ← { name, tokenHash } → { id, code, domain }
+ *   GET    /_dev-proxy/pair/:id       → { status, domain }
  *   GET    /_dev-proxy/peers          → { domain, peers: { [sub]: PeerEntry } }
  *   PUT    /_dev-proxy/peers/:sub     ← { target, owner }
  *   DELETE /_dev-proxy/peers/:sub
@@ -29,10 +33,15 @@ export function isControlPath(url: string | undefined): boolean {
   return url?.startsWith(CONTROL_PREFIX) === true;
 }
 
+/** Drop the IPv4-mapped IPv6 prefix so addresses read and compare as IPv4. */
+function plainAddress(address: string): string {
+  return address.startsWith("::ffff:") ? address.slice(7) : address;
+}
+
 /** Loopback, RFC 1918, link-local and CGNAT ranges — the only callers we accept. */
 export function isPrivateAddress(address: string | undefined): boolean {
   if (!address) return false;
-  const ip = address.startsWith("::ffff:") ? address.slice(7) : address;
+  const ip = plainAddress(address);
   if (ip === "::1") return true;
   if (net.isIPv4(ip)) {
     const [a = 0, b = 0] = ip.split(".").map(Number);
@@ -50,11 +59,15 @@ export function isPrivateAddress(address: string | undefined): boolean {
   return lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80");
 }
 
-function tokenMatches(header: string | undefined, token: string): boolean {
-  if (!header?.startsWith("Bearer ")) return false;
-  const given = Buffer.from(header.slice(7).trim());
-  const expected = Buffer.from(token);
-  return given.length === expected.length && timingSafeEqual(given, expected);
+function bearerToken(header: string | undefined): string | null {
+  if (!header?.startsWith("Bearer ")) return null;
+  return header.slice(7).trim() || null;
+}
+
+function tokenMatches(given: string, token: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
@@ -99,6 +112,48 @@ function serializePeers(): { domain: string; peers: Record<string, PeerEntry> } 
   return { domain: config.domain, peers: Object.fromEntries(listPeers()) };
 }
 
+function handlePair(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  id: string | undefined,
+  bearer: string | null,
+): void {
+  if (req.method === "POST" && !id) {
+    void readJsonBody(req)
+      .then((body) => {
+        const result = requestPairing(
+          typeof body.name === "string" ? body.name : "",
+          plainAddress(req.socket.remoteAddress ?? ""),
+          typeof body.tokenHash === "string" ? body.tokenHash : "",
+        );
+        if (!result.ok) {
+          send(res, result.status, { error: result.error });
+          return;
+        }
+        send(res, 200, {
+          id: result.request.id,
+          code: pairCode(result.request.tokenHash),
+          domain: config.domain,
+        });
+      })
+      .catch((err: unknown) => {
+        send(res, 400, { error: (err as Error).message });
+      });
+    return;
+  }
+
+  if (req.method === "GET" && id) {
+    if (!bearer) {
+      send(res, 401, { error: "invalid or missing bearer token" });
+      return;
+    }
+    send(res, 200, { status: pairingStatus(id, bearer), domain: config.domain });
+    return;
+  }
+
+  send(res, 405, { error: "method not allowed" });
+}
+
 /**
  * Returns a handler that fully answers control requests. The proxy's request
  * handler calls it first and skips normal routing when it returns true.
@@ -113,13 +168,28 @@ export function createControlHandler(
       send(res, 403, { error: "control API is only available from the local network" });
       return true;
     }
-    if (!tokenMatches(req.headers.authorization, token)) {
-      send(res, 401, { error: "invalid or missing bearer token" });
+    // Node clients never send Origin; a browser attaches it to every request
+    // that could change state, and a web page has no business driving this API.
+    if (req.headers.origin !== undefined) {
+      send(res, 403, { error: "control API does not accept browser requests" });
       return true;
     }
 
     const path = (req.url ?? "").slice(CONTROL_PREFIX.length).replace(/\?.*$/, "");
     const [resource, sub, ...rest] = path.split("/");
+    const bearer = bearerToken(req.headers.authorization);
+
+    // Pairing is how a machine gets a token, so it cannot require one.
+    if (resource === "pair" && rest.length === 0) {
+      handlePair(req, res, sub, bearer);
+      return true;
+    }
+
+    const deviceId = bearer ? deviceIdForToken(bearer) : null;
+    if (!bearer || !(tokenMatches(bearer, token) || deviceId !== null)) {
+      send(res, 401, { error: "invalid or missing bearer token" });
+      return true;
+    }
 
     if (resource !== "peers" || rest.length > 0) {
       send(res, 404, { error: "not found" });
@@ -136,7 +206,8 @@ export function createControlHandler(
         .then((body) => {
           const target = typeof body.target === "string" ? body.target : "";
           const owner = typeof body.owner === "string" ? body.owner : "";
-          const result = claimPeer(sub, target, owner);
+          // Remember which machine claimed it so revoking the machine frees the subdomain.
+          const result = claimPeer(sub, target, owner, deviceId ?? undefined);
           if (!result.ok) {
             send(res, 400, { error: result.error });
             return;

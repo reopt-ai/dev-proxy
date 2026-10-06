@@ -61,7 +61,7 @@ All subcommands are Ink components in `src/commands/`. Shared output primitives 
 
 `worktree create/destroy` — full lifecycle (git worktree + multi-port allocation + .env.local generation + hooks). `worktree add/remove` — manual single-port registration only. `worktreeConfig.services` maps subdomains to env variable names; `worktree create` allocates one port per service and writes `.env.local`. Worktree entry type is `{ ports: Record<string, number> }` (multi) or `{ port: number }` (legacy). Use `getServicePort(entry, service)` for routing, `getEntryPorts(entry)` for all ports.
 
-`peer` — control API client (`src/cli/peer-client.ts`) for the root's `/_dev-proxy/peers` endpoints (`src/proxy/control.ts`). Plain console output, not Ink, because `peer run` hands the terminal to the wrapped dev server.
+`peer` — control API client (`src/cli/peer-client.ts`) for the root's `/_dev-proxy/` endpoints (`src/proxy/control.ts`). `peer join` pairs instead of copying a token: the peer sends the hash of a token it generated, the root's TUI prompts for approval (`src/proxy/pairing.ts`, `src/components/pair-prompt.tsx`), and approved hashes live in `~/.dev-proxy/peer-devices.json`. Plain console output, not Ink, because `peer run` hands the terminal to the wrapped dev server.
 
 To add a new command: create `src/commands/<name>.tsx`, add case to `src/cli.ts`, update help.tsx.
 

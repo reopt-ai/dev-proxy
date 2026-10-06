@@ -51,7 +51,7 @@ function Help() {
       </Text>
       <Text>
         {"  peer                "}
-        <Text dimColor>Claim subdomains on the root proxy from another machine</Text>
+        <Text dimColor>Pair with the root proxy and claim subdomains on it</Text>
       </Text>
       <Text>{""}</Text>
 
@@ -92,6 +92,10 @@ function Help() {
       <Text>
         {"  "}
         <Text color="cyan">$ dev-proxy worktree destroy feature-auth</Text>
+      </Text>
+      <Text>
+        {"  "}
+        <Text color="cyan">$ dev-proxy peer join example.dev</Text>
       </Text>
       <Text>
         {"  "}

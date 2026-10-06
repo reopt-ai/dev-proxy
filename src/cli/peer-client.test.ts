@@ -22,11 +22,14 @@ const {
   PeerApiError,
   claim,
   defaultOwner,
+  fetchPairStatus,
   fetchPeers,
   normalizeRoot,
   readPeerClientConfig,
   release,
+  requestPair,
   resolvePeerClient,
+  rootCandidates,
   writePeerClientConfig,
 } = await import("./peer-client.js");
 
@@ -53,7 +56,11 @@ describe("normalizeRoot", () => {
   it("fills in the scheme and default port", () => {
     expect(normalizeRoot("192.168.1.10", 3000)).toBe("http://192.168.1.10:3000");
     expect(normalizeRoot("box.lan:3100", 3000)).toBe("http://box.lan:3100");
-    expect(normalizeRoot("https://box.lan", 3000)).toBe("https://box.lan:3000");
+  });
+
+  it("leaves https on its own default port", () => {
+    expect(normalizeRoot("https://box.lan", 3000)).toBe("https://box.lan");
+    expect(normalizeRoot("https://box.lan:3443", 3000)).toBe("https://box.lan:3443");
   });
 
   it("rejects paths and garbage", () => {
@@ -163,5 +170,65 @@ describe("API calls", () => {
     expect((err as Error).message).toBe(
       "cannot reach root proxy at http://r:3000: ECONNREFUSED",
     );
+  });
+});
+
+describe("rootCandidates", () => {
+  it("tries root.<domain> over TLS first for a bare hostname", () => {
+    expect(rootCandidates("example.dev", 3000)).toEqual([
+      "https://root.example.dev",
+      "http://root.example.dev:3000",
+      "http://example.dev:3000",
+    ]);
+    expect(rootCandidates("root.example.dev", 3000)).toEqual([
+      "https://root.example.dev",
+      "http://root.example.dev:3000",
+    ]);
+  });
+
+  it("uses an IP, an explicit port or a full origin exactly as given", () => {
+    expect(rootCandidates("192.168.1.10", 3000)).toEqual(["http://192.168.1.10:3000"]);
+    expect(rootCandidates("[fd12::1]", 3000)).toEqual(["http://[fd12::1]:3000"]);
+    expect(rootCandidates("box.lan:3100", 3000)).toEqual(["http://box.lan:3100"]);
+    expect(rootCandidates("https://root.example.dev", 3000)).toEqual([
+      "https://root.example.dev",
+    ]);
+  });
+
+  it("returns nothing for garbage", () => {
+    expect(rootCandidates("box.lan/proxy", 3000)).toEqual([]);
+  });
+});
+
+describe("pairing calls", () => {
+  it("sends only the name and token hash, without credentials", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { id: "req1", code: "ABC-123", domain: "example.dev" }),
+    );
+    await expect(
+      requestPair("https://root.example.dev", "box-b", "hash"),
+    ).resolves.toEqual({ id: "req1", code: "ABC-123", domain: "example.dev" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://root.example.dev/_dev-proxy/pair");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({ name: "box-b", tokenHash: "hash" }));
+    expect(init.headers).not.toHaveProperty("Authorization");
+  });
+
+  it("rejects a 200 that is not a pair response", async () => {
+    fetchMock.mockResolvedValue(new Response("<html>hello</html>", { status: 200 }));
+    await expect(
+      requestPair("https://root.example.dev", "box-b", "hash"),
+    ).rejects.toThrow(/did not answer like a dev-proxy root/);
+  });
+
+  it("polls status with the token it generated", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { status: "approved" }));
+    await expect(
+      fetchPairStatus("https://root.example.dev", "req 1", "tok"),
+    ).resolves.toBe("approved");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://root.example.dev/_dev-proxy/pair/req%201");
+    expect(init.headers).toMatchObject({ Authorization: "Bearer tok" });
   });
 });

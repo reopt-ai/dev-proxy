@@ -1,19 +1,26 @@
 import { spawn } from "node:child_process";
 import { config } from "../proxy/config.js";
-import { isValidPeerSubdomain, type PeerEntry } from "../proxy/peers.js";
+import {
+  isValidPeerSubdomain,
+  loadPeers,
+  releasePeersOfDevices,
+  type PeerEntry,
+} from "../proxy/peers.js";
+import { listDevices, loadDevices, revokeDevice } from "../proxy/pairing.js";
 import { getLanAddresses } from "../cli/net.js";
 import {
   claim,
   defaultOwner,
   fetchPeers,
-  normalizeRoot,
   PEER_CLIENT_PATH,
   PeerApiError,
   release,
   resolvePeerClient,
+  rootCandidates,
   writePeerClientConfig,
   type PeerClientConfig,
 } from "../cli/peer-client.js";
+import { joinByPairing, joinWithToken } from "../cli/peer-join.js";
 
 /**
  * `dev-proxy peer` — claim subdomains on the root proxy from another machine.
@@ -91,7 +98,7 @@ function requireClient(): PeerClientConfig {
   if (!cfg) {
     fail(
       "not joined to a root proxy",
-      "run `dev-proxy peer join <root-host> --token <token>` first (token: ~/.dev-proxy/peer-token on the root)",
+      "run `dev-proxy peer join <root domain>` first and approve it on the root",
     );
   }
   return cfg;
@@ -136,21 +143,65 @@ function apiMessage(err: unknown): string {
 
 // ── Subcommands ──────────────────────────────────────────────
 
-function join(args: ParsedArgs): void {
+async function join(args: ParsedArgs): Promise<void> {
   const hostArg = args.positional[0];
-  const token = flagString(args.flags, "token");
-  if (!hostArg)
-    fail("root host is required", "e.g. dev-proxy peer join 192.168.1.10 --token …");
-  if (!token)
+  if (!hostArg) {
     fail(
-      "--token is required",
-      "copy it from ~/.dev-proxy/peer-token on the root machine",
+      "root is required",
+      "e.g. dev-proxy peer join example.dev (the root's dev domain) or 192.168.1.10",
     );
-  const root = normalizeRoot(hostArg, config.port);
-  if (!root) fail(`invalid root "${hostArg}"`);
-  writePeerClientConfig({ root, token });
-  out(`\n  ${OK} joined root proxy at ${CYAN(root)}`);
+  }
+  const candidates = rootCandidates(hostArg, config.port);
+  if (candidates.length === 0) fail(`invalid root "${hostArg}"`);
+
+  const token = flagString(args.flags, "token");
+  const outcome = token
+    ? await joinWithToken(candidates, token)
+    : await joinByPairing(candidates, flagString(args.flags, "name") ?? defaultOwner(), {
+        onRequested: ({ root, code, domain }) => {
+          out(`\n  requesting to join ${CYAN(root)} ${DIM(`(*.${domain})`)}`);
+          out(`  code  ${CYAN(code)}`);
+          out(
+            `  ${DIM("approve it in dev-proxy on the root machine (press A, then Y) — waiting…")}`,
+          );
+        },
+      });
+  if (!outcome.ok) fail(outcome.error, outcome.hint);
+
+  writePeerClientConfig({ root: outcome.root, token: outcome.token });
+  out(`\n  ${OK} joined root proxy at ${CYAN(outcome.root)}`);
   out(`    ${DIM(`saved to ${PEER_CLIENT_PATH}`)}\n`);
+}
+
+// ── Root-side device management ──────────────────────────────
+
+function devicesCmd(): void {
+  loadDevices();
+  const devices = [...listDevices().values()];
+  if (devices.length === 0) {
+    out("\n  no paired machines\n");
+    return;
+  }
+  out(`\n  ${DIM("name".padEnd(24))} ${DIM("address".padEnd(16))} ${DIM("paired")}`);
+  for (const device of devices) {
+    const paired = new Date(device.approvedAt).toISOString().slice(0, 10);
+    out(`  ${CYAN(device.name.padEnd(24))} ${device.address.padEnd(16)} ${paired}`);
+  }
+  out("");
+}
+
+function revokeCmd(args: ParsedArgs): void {
+  const name = args.positional[0];
+  if (!name) fail("machine name is required", "see `dev-proxy peer devices`");
+  loadDevices();
+  const ids = revokeDevice(name);
+  if (ids.length === 0) fail(`no paired machine named "${name}"`);
+  // The machine can no longer release its claims itself, so drop them with it.
+  loadPeers();
+  const released = releasePeersOfDevices(new Set(ids));
+  out(`\n  ${OK} revoked ${CYAN(name)}`);
+  if (released.length > 0) out(`    ${DIM(`released ${released.join(", ")}`)}`);
+  out("");
 }
 
 async function list(): Promise<void> {
@@ -258,11 +309,13 @@ async function run(args: ParsedArgs): Promise<void> {
 function usage(): void {
   out(`
   ${DIM("Usage")}
-    dev-proxy peer join <root-host[:port]> --token <token>
+    dev-proxy peer join <root-domain | host[:port]> [--name <name>] [--token <token>]
     dev-proxy peer claim <subdomain> --port <n> [--host <ip>] [--owner <name>]
     dev-proxy peer release <subdomain>
     dev-proxy peer run <subdomain> --port <n> [--host <ip>] -- <command…>
     dev-proxy peer list
+    dev-proxy peer devices                 ${DIM("(on the root) machines paired with it")}
+    dev-proxy peer revoke <name>           ${DIM("(on the root) unpair a machine")}
 
   ${DIM("The root proxy routes <subdomain>.<root domain> to this machine while the claim is held.")}
 `);
@@ -276,7 +329,13 @@ const parsed = parseArgs(argv.slice(1));
 
 switch (sub) {
   case "join":
-    join(parsed);
+    await join(parsed);
+    break;
+  case "devices":
+    devicesCmd();
+    break;
+  case "revoke":
+    revokeCmd(parsed);
     break;
   case "claim":
     await claimCmd(parsed);
