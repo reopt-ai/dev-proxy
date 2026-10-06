@@ -18,7 +18,10 @@ vi.mock("node:fs", () => ({
   mkdirSync: vi.fn(),
 }));
 vi.mock("./config.js", () => ({ CONFIG_DIR: "/mock/.dev-proxy" }));
-vi.mock("react", () => ({ useSyncExternalStore: vi.fn() }));
+const useSyncExternalStore = vi.fn();
+vi.mock("react", () => ({
+  useSyncExternalStore: (...args: unknown[]) => useSyncExternalStore(...args) as unknown,
+}));
 
 const {
   __testing,
@@ -35,6 +38,7 @@ const {
   requestPairing,
   revokeDevice,
   sanitizeDeviceName,
+  usePairRequests,
 } = await import("./pairing.js");
 
 const TOKEN = "peer-secret";
@@ -48,6 +52,7 @@ function request(name = "box-b", address = "192.168.1.20", hash = HASH, now = 10
 
 beforeEach(() => {
   files.clear();
+  useSyncExternalStore.mockReset();
   __testing.reset();
 });
 
@@ -175,5 +180,47 @@ describe("devices file", () => {
     expect(revokeDevice("box-b")).toEqual([req.id]);
     expect(deviceIdForToken(TOKEN)).toBeNull();
     expect(files.get(PEER_DEVICES_PATH)?.trim()).toBe("{}");
+  });
+});
+
+describe("usePairRequests", () => {
+  it("exposes pending requests to React and notifies on every change", () => {
+    useSyncExternalStore.mockImplementation(
+      (subscribe: (cb: () => void) => () => void, getSnapshot: () => unknown) => {
+        const listener = vi.fn();
+        const unsubscribe = subscribe(listener);
+        const req = request();
+        expect(listener).toHaveBeenCalledTimes(1);
+        expect(getSnapshot()).toEqual([req]);
+        denyPairing(req.id);
+        expect(listener).toHaveBeenCalledTimes(2);
+        expect(getSnapshot()).toEqual([]);
+        unsubscribe();
+        request("box-c", "10.0.0.3");
+        expect(listener).toHaveBeenCalledTimes(2);
+        return getSnapshot();
+      },
+    );
+    expect(usePairRequests()).toHaveLength(1);
+  });
+
+  it("drops an unanswered request from the snapshot once it expires", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1000);
+      request("box-b", "192.168.1.20", HASH, 1000);
+      let snapshot: unknown;
+      useSyncExternalStore.mockImplementation(
+        (_subscribe: unknown, getSnapshot: () => unknown) => (snapshot = getSnapshot()),
+      );
+      usePairRequests();
+      expect(snapshot).toHaveLength(1);
+
+      vi.advanceTimersByTime(PAIR_TTL_MS + 1000);
+      usePairRequests();
+      expect(snapshot).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -78,6 +78,21 @@ describe("joinByPairing", () => {
     );
   });
 
+  it("polls on a real timer when no clock is injected", async () => {
+    vi.useFakeTimers();
+    try {
+      requestPair.mockResolvedValue(PAIR);
+      fetchPairStatus.mockResolvedValue("approved");
+
+      const pending = joinByPairing(CANDIDATES, "box-b", { onRequested: vi.fn() });
+      await vi.advanceTimersByTimeAsync(1500);
+
+      expect(await pending).toMatchObject({ ok: true, root: "https://root.example.dev" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to the next address when the first is unreachable", async () => {
     requestPair
       .mockRejectedValueOnce(new PeerApiError("cannot reach root"))
