@@ -339,15 +339,24 @@ public DNS for the dev domain points at it (the **root**). This machine then
 needs no proxy, no DNS and no certificate — it only claims the subdomains it
 serves.
 
-1. Ask the user for the root's LAN address and the token from
-   `~/.dev-proxy/peer-token` on the root (never guess the token; never print
-   it back in full).
-2. Join once:
+Nothing runs in the background on a peer: `peer join` exits once approved,
+and `peer run` lives only as long as the dev server it wraps. The root checks
+that a claim is still alive by probing the app's port itself.
+
+1. Ask the user for the root's dev domain (or its LAN address when there is
+   no wildcard DNS).
+2. Join once. The command prints a code and waits until someone presses `A`
+   and then `Y` in dev-proxy on the root machine — tell the user to approve it there and
+   to check that the code matches:
 
    ```bash
-   dev-proxy peer join <root-ip> --token <token>
-   dev-proxy peer list          # proves the connection; shows current claims
+   dev-proxy peer join <domain>   # reaches the root at https://root.<domain>
+   dev-proxy peer list            # proves the connection; shows current claims
    ```
+
+   Only when nobody can approve on the root, fall back to
+   `--token <token>` with the value of `~/.dev-proxy/peer-token` from the
+   root (never guess the token; never print it back in full).
 
 3. For each app this machine will run, wrap its dev script so the claim lives
    exactly as long as the dev server:
@@ -366,6 +375,25 @@ serves.
    gives a subdomain back manually.
 
 Skip the rest of this skill for peer machines.
+
+### On the root machine
+
+When the machine being set up is the root that others will join:
+
+- Pair requests appear as a `PAIR REQUEST <name> <address> │ code …` line at
+  the bottom of the dev-proxy TUI. `A` then `Y` approves, `D` denies; unanswered
+  requests expire after 5 minutes. Approve only when the code matches what
+  the joining machine printed.
+- `dev-proxy peer devices` lists paired machines and
+  `dev-proxy peer revoke <name>` unpairs one and releases the subdomains it
+  had claimed.
+- `peer join <domain>` reaches the root at `https://root.<domain>`, which
+  needs the HTTPS port to be 443. On macOS an unprivileged process can bind
+  it, so offer `dev-proxy config set httpsPort 443` (then restart the proxy);
+  URLs also lose their `:3443` suffix. Otherwise `peer join <domain>` falls
+  back to plain HTTP on the proxy port (`http://root.<domain>:<port>`).
+- Reserve the root's LAN IP in the router's DHCP settings — the public DNS
+  record and every peer depend on it.
 
 ## Phase 4: DNS Setup
 

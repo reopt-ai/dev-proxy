@@ -116,6 +116,8 @@ Config lives in three files for new setups:
 }
 ```
 
+`port` and `httpsPort` can be 80 and 443 so URLs need no port suffix (`dev-proxy config set httpsPort 443`). macOS lets an unprivileged process bind them; on Linux, ports below 1024 need extra privileges.
+
 Optional keys:
 
 - `certPath` / `keyPath` — use your own certificate instead of the mkcert default (relative paths resolve from `~/.dev-proxy/`). See [Access from other devices](#access-from-other-devices).
@@ -206,16 +208,20 @@ In every setup, run `dev-proxy doctor`: the **Network** section shows the addres
 
 With public DNS pointing at one machine (the **root**), a second machine can take over a subdomain without running a proxy and without anyone touching hosts files. The root routes the subdomain to the peer's app port; TLS, the inspector and every hostname stay on the root, so cookies, OAuth redirect URIs and CORS allow-lists do not change.
 
-On the root, the token is created on first start at `~/.dev-proxy/peer-token`. On the peer:
+On the peer:
 
 ```bash
-dev-proxy peer join 192.168.1.10 --token <token>          # once
+dev-proxy peer join example.dev                            # once — prints a code and waits
 dev-proxy peer run studio --port 3001 -- pnpm dev          # claim studio while pnpm dev runs
 ```
 
+`peer join <domain>` reaches the root at `https://root.<domain>` (the wildcard record already resolves it, so nobody needs the root's IP) and asks to pair. The root's TUI shows the machine's name, address and the same code; press `A` then `Y` there to approve, or `D` to deny. No secret is copied by hand: the peer generates its own token and the root stores only its hash. On the root, `dev-proxy peer devices` lists paired machines and `dev-proxy peer revoke <name>` unpairs one and releases the subdomains it had claimed.
+
+`https://root.<domain>` needs the root's `httpsPort` to be 443; otherwise `peer join` falls back to plain HTTP on the proxy port. Without wildcard DNS, pass an address instead (`peer join 192.168.1.10`). `--token <token>` skips the approval using the root's own token from `~/.dev-proxy/peer-token`, which is useful for unattended setups.
+
 `peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
 
-Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy port) only answers callers from loopback or private networks and always requires the bearer token.
+Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy port) only answers callers from loopback or private networks, refuses requests sent by a browser, and requires a bearer token for everything except the pair request itself.
 
 ### Worktree Routing
 
@@ -431,11 +437,13 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 | `dev-proxy worktree add <name> <port>`         | Register worktree manually (no git operations)                                                  |
 | `dev-proxy worktree remove <name>`             | Unregister worktree manually                                                                    |
 | `dev-proxy worktree list`                      | List all worktrees                                                                              |
-| `dev-proxy peer join <root> --token <t>`       | Point this machine at a root proxy                                                              |
+| `dev-proxy peer join <root>`                   | Pair this machine with a root proxy (approved on the root)                                      |
 | `dev-proxy peer run <sub> --port <n> -- <cmd>` | Claim a subdomain while `<cmd>` runs                                                            |
 | `dev-proxy peer claim <sub> --port <n>`        | Claim a subdomain on the root                                                                   |
 | `dev-proxy peer release <sub>`                 | Release a claim                                                                                 |
 | `dev-proxy peer list`                          | List claims with owner and reachability                                                         |
+| `dev-proxy peer devices`                       | On the root: list paired machines                                                               |
+| `dev-proxy peer revoke <name>`                 | On the root: unpair a machine and release its claims                                            |
 | `dev-proxy --help`                             | Show help                                                                                       |
 | `dev-proxy --version`                          | Show version                                                                                    |
 

@@ -13,12 +13,14 @@ import {
 import { rebuildRoutes } from "./proxy/routes.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
 import { loadPeers, startPeerProbes, stopPeerProbes, PEERS_PATH } from "./proxy/peers.js";
+import { loadDevices, PEER_DEVICES_PATH } from "./proxy/pairing.js";
 import { createProxyServer, startProxyServer, destroyAgents } from "./proxy/server.js";
 import { pushHttp, pushWs } from "./store.js";
 import { App } from "./components/app.js";
 
 loadRegistry();
 loadPeers();
+loadDevices();
 
 const { server, httpsServer, emitter } = createProxyServer();
 let shuttingDown = false;
@@ -138,9 +140,13 @@ let peersDebounce: ReturnType<typeof setTimeout> | null = null;
 function watchPeersFile(): void {
   try {
     const w = watch(dirname(PEERS_PATH), (_event, filename) => {
-      if (filename !== basename(PEERS_PATH)) return;
+      if (filename !== basename(PEERS_PATH) && filename !== basename(PEER_DEVICES_PATH))
+        return;
       if (peersDebounce) clearTimeout(peersDebounce);
-      peersDebounce = setTimeout(loadPeers, 150);
+      peersDebounce = setTimeout(() => {
+        loadPeers();
+        loadDevices();
+      }, 150);
     });
     w.on("error", () => {
       /* intentional: watcher errors are non-fatal */
@@ -168,8 +174,9 @@ function watchFile(dir: string, base: string): void {
 // Watch global config
 watchFile(dirname(GLOBAL_CONFIG_PATH), basename(GLOBAL_CONFIG_PATH));
 
-// Peer claims: the control API updates the in-memory registry directly, but
-// the file can also be edited by hand or by another root process.
+// Peer claims and paired machines: the control API updates the in-memory
+// state directly, but the files are also edited by hand, by another root
+// process, or by `peer revoke`.
 watchPeersFile();
 startPeerProbes();
 

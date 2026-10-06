@@ -54,6 +54,7 @@ const {
   __testing,
   claimPeer,
   releasePeer,
+  releasePeersOfDevices,
   loadPeers,
   getPeerTarget,
   listPeers,
@@ -140,6 +141,29 @@ describe("claimPeer / releasePeer", () => {
 });
 
 // ── Persistence ──────────────────────────────────────────────
+
+describe("releasePeersOfDevices", () => {
+  it("drops only the claims made by the given machines and persists the rest", () => {
+    claimPeer("studio", "http://192.168.1.20:3001", "box-b", "dev1");
+    claimPeer("docs", "http://192.168.1.21:3002", "box-c", "dev2");
+    claimPeer("api", "http://192.168.1.10:3003", "root");
+
+    expect(releasePeersOfDevices(new Set(["dev1"]))).toEqual(["studio"]);
+    expect([...listPeers().keys()]).toEqual(["docs", "api"]);
+    expect(Object.keys(JSON.parse(files.get(PEERS_PATH) ?? "{}") as object)).toEqual([
+      "docs",
+      "api",
+    ]);
+    expect(releasePeersOfDevices(new Set(["dev1"]))).toEqual([]);
+  });
+
+  it("keeps the claiming machine across a reload", () => {
+    claimPeer("studio", "http://192.168.1.20:3001", "box-b", "dev1");
+    __testing.reset();
+    loadPeers();
+    expect(releasePeersOfDevices(new Set(["dev1"]))).toEqual(["studio"]);
+  });
+});
 
 describe("loadPeers", () => {
   it("reads valid claims and skips malformed entries", () => {
