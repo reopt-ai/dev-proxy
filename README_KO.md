@@ -31,6 +31,7 @@ dev-proxy는:
 - **터미널 네이티브** — 브라우저 창 없이 터미널에서 바로 확인
 - **Vim 스타일 네비게이션** — `j`/`k`로 탐색, `/`로 검색, `r`로 재전송
 - **Worktree 지원** — `branch--app.domain` 형태로 워크트리별 포트 자동 라우팅
+- **팀 공유** — root 프록시 하나가 LAN 전체를 담당하고, 다른 머신은 `peer run`으로 서브도메인을 가져감 (root TUI에서 승인)
 - **경량** — 런타임 의존성 2개(`ink` + `react`), ~10fps 스로틀 렌더링
 
 ## 주요 기능
@@ -42,6 +43,7 @@ dev-proxy는:
 - 원본 헤더 포함 요청 재전송 및 curl 클립보드 복사
 - 업스트림 `http`/`https`, `ws`/`wss` 타깃 지원
 - 프로젝트 설정 기반 Git worktree 동적 라우팅
+- [피어](#피어-다른-머신에서-서브도메인-서빙하기): LAN의 다른 머신에서 서브도메인 서빙 — `peer join <domain>`은 root에서 한 번 승인하면 페어링 완료(토큰 복사 없음), `peer run`은 개발 서버가 도는 동안 서브도메인을 점유하고 종료 시 해제
 - [mkcert](https://github.com/FiloSottile/mkcert)를 이용한 TLS 인증서 자동 생성
 - 프로젝트 기반 설정: 전역 (`~/.dev-proxy/config.json`) + 프로젝트별 (`dev-proxy.config.mjs`에 라우트 + `worktreeConfig`, `.dev-proxy.worktrees.json`에 CLI가 관리하는 워크트리 맵). 레거시 `.dev-proxy.json`은 fallback으로만 읽힙니다.
 

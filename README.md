@@ -31,6 +31,7 @@ dev-proxy is:
 - **Terminal-native** — No browser windows to manage; lives where you already work
 - **Vim-style navigation** — `j`/`k` to browse, `/` to search, `r` to replay
 - **Worktree-aware** — Routes `branch--app.domain` to per-worktree ports automatically
+- **Team-ready** — One root proxy serves the whole LAN; another machine takes over a subdomain with `peer run`, approved from the root's TUI
 - **Lightweight** — Two runtime dependencies (`ink` + `react`), ~10fps throttled rendering
 
 ## Features
@@ -42,6 +43,7 @@ dev-proxy is:
 - Request replay with original headers and curl copy to clipboard
 - Upstream `http`/`https` and `ws`/`wss` target support
 - Git worktree-based dynamic routing via project config
+- [Peers](#peers-serve-a-subdomain-from-another-machine): serve a subdomain from another machine on the LAN — `peer join <domain>` pairs with one approval on the root (no token copying), `peer run` claims the subdomain while the dev server runs and releases it on exit
 - Auto-generated TLS certificates via [mkcert](https://github.com/FiloSottile/mkcert)
 - Project-based config: global (`~/.dev-proxy/config.json`) + per-project (`dev-proxy.config.mjs` for routes + `worktreeConfig`, `.dev-proxy.worktrees.json` for the CLI-managed worktree map). Legacy `.dev-proxy.json` is read as a fallback.
 
