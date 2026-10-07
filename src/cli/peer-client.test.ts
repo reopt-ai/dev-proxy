@@ -109,9 +109,10 @@ describe("peer client config", () => {
 
   it("resolvePeerClient uses loopback HTTPS when the HTTP listener is off", () => {
     files.set("/mock/.dev-proxy/peer-token", "local-token\n");
-    expect(resolvePeerClient(null, 443)).toEqual({
+    expect(resolvePeerClient(null, 443, "example.dev")).toEqual({
       root: "https://127.0.0.1:443",
       token: "local-token",
+      servername: "example.dev",
     });
   });
 });
@@ -202,7 +203,7 @@ describe("API calls", () => {
     await expect(fetchPeers(cfg)).rejects.toMatchObject({ code: "ETIMEDOUT" });
   });
 
-  it("talks to a loopback HTTPS root without certificate verification", async () => {
+  it("verifies a loopback HTTPS root against the dev domain, not 127.0.0.1", async () => {
     const { default: https } = await import("node:https");
     const { default: http } = await import("node:http");
     // The request module is what needs exercising; the server can be plain HTTP
@@ -228,11 +229,13 @@ describe("API calls", () => {
     const result = await fetchPeers({
       root: `https://127.0.0.1:${String(port)}`,
       token: "t",
+      servername: "example.dev",
     });
 
     expect(result.domain).toBe("d.test");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(spy.mock.calls[0]?.[1]).toMatchObject({ rejectUnauthorized: false });
+    expect(spy.mock.calls[0]?.[1]).toMatchObject({ servername: "example.dev" });
+    expect(spy.mock.calls[0]?.[1]).not.toHaveProperty("rejectUnauthorized");
     server.close();
   });
 });

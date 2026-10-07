@@ -94,7 +94,7 @@ function flagString(flags: ParsedArgs["flags"], name: string): string | undefine
 // ── Shared helpers ───────────────────────────────────────────
 
 function requireClient(): PeerClientConfig {
-  const cfg = resolvePeerClient(config.port, config.httpsPort);
+  const cfg = resolvePeerClient(config.port, config.httpsPort, config.domain);
   if (!cfg) {
     fail(
       "not joined to a root proxy",

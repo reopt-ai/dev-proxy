@@ -21,6 +21,12 @@ export interface PeerClientConfig {
   /** Root proxy origin, e.g. `https://root.example.dev` or `http://192.168.1.10:3000`. */
   root: string;
   token: string;
+  /**
+   * Hostname to verify the certificate against when `root` is loopback HTTPS
+   * (the root machine with its HTTP listener off): the certificate is issued
+   * for the dev domain, not for 127.0.0.1.
+   */
+  servername?: string;
 }
 
 export function readPeerClientConfig(): PeerClientConfig | null {
@@ -52,17 +58,21 @@ export function writePeerClientConfig(cfg: PeerClientConfig): void {
 export function resolvePeerClient(
   localPort: number | null,
   localHttpsPort = 3443,
+  domain = "localhost",
 ): PeerClientConfig | null {
   const joined = readPeerClientConfig();
   if (joined) return joined;
   try {
     const token = readFileSync(PEER_TOKEN_PATH, "utf-8").trim();
     if (token) {
-      const root =
-        localPort === null
-          ? `https://127.0.0.1:${String(localHttpsPort)}`
-          : `http://127.0.0.1:${String(localPort)}`;
-      return { root, token };
+      if (localPort === null) {
+        return {
+          root: `https://127.0.0.1:${String(localHttpsPort)}`,
+          token,
+          servername: domain,
+        };
+      }
+      return { root: `http://127.0.0.1:${String(localPort)}`, token };
     }
   } catch {
     // No local root either.
@@ -176,22 +186,14 @@ interface Reply {
 }
 
 /**
- * The root's certificate is issued for its domain, not for 127.0.0.1, so the
- * loopback HTTPS path (root machine with the HTTP listener off) cannot verify
- * it. Nothing can intercept a loopback socket, so skipping verification there
- * is safe; it is never done for any other address.
+ * fetch cannot be told which name to check a certificate against, so the
+ * loopback HTTPS path goes through `https.request` with `servername` set to
+ * the dev domain. The certificate is still fully verified — just against the
+ * name it was issued for instead of 127.0.0.1.
  */
-function isLoopbackHttps(root: string): boolean {
-  try {
-    const url = new URL(root);
-    return url.protocol === "https:" && url.hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-function loopbackRequest(
+function namedRequest(
   url: string,
+  servername: string,
   method: string,
   headers: Record<string, string>,
   body: string | undefined,
@@ -199,7 +201,7 @@ function loopbackRequest(
   return new Promise((resolve, reject) => {
     const req = https.request(
       url,
-      { method, headers, rejectUnauthorized: false, timeout: CALL_TIMEOUT_MS },
+      { method, headers, servername, timeout: CALL_TIMEOUT_MS },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
@@ -224,7 +226,7 @@ function loopbackRequest(
 }
 
 async function call<T = PeersResponse>(
-  cfg: { root: string; token?: string },
+  cfg: { root: string; token?: string; servername?: string },
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
@@ -237,14 +239,15 @@ async function call<T = PeersResponse>(
   const payload = body !== undefined ? JSON.stringify(body) : undefined;
   let res: Reply;
   try {
-    res = isLoopbackHttps(cfg.root)
-      ? await loopbackRequest(url, method, headers, payload)
-      : await fetch(url, {
-          method,
-          headers,
-          body: payload,
-          signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-        });
+    res =
+      cfg.servername !== undefined && cfg.root.startsWith("https://")
+        ? await namedRequest(url, cfg.servername, method, headers, payload)
+        : await fetch(url, {
+            method,
+            headers,
+            body: payload,
+            signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+          });
   } catch (err) {
     const failure = networkFailure(err);
     throw new PeerApiError(
