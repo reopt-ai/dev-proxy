@@ -94,7 +94,7 @@ function flagString(flags: ParsedArgs["flags"], name: string): string | undefine
 // ── Shared helpers ───────────────────────────────────────────
 
 function requireClient(): PeerClientConfig {
-  const cfg = resolvePeerClient(config.port);
+  const cfg = resolvePeerClient(config.port, config.httpsPort);
   if (!cfg) {
     fail(
       "not joined to a root proxy",
@@ -157,15 +157,20 @@ async function join(args: ParsedArgs): Promise<void> {
   const token = flagString(args.flags, "token");
   const outcome = token
     ? await joinWithToken(candidates, token)
-    : await joinByPairing(candidates, flagString(args.flags, "name") ?? defaultOwner(), {
-        onRequested: ({ root, code, domain }) => {
-          out(`\n  requesting to join ${CYAN(root)} ${DIM(`(*.${domain})`)}`);
-          out(`  code  ${CYAN(code)}`);
-          out(
-            `  ${DIM("approve it in dev-proxy on the root machine (press A, then Y) — waiting…")}`,
-          );
+    : await joinByPairing(
+        candidates,
+        flagString(args.flags, "name") ?? defaultOwner(),
+        {
+          onRequested: ({ root, code, domain }) => {
+            out(`\n  requesting to join ${CYAN(root)} ${DIM(`(*.${domain})`)}`);
+            out(`  code  ${CYAN(code)}`);
+            out(
+              `  ${DIM("approve it in dev-proxy on the root machine (press A, then Y) — waiting…")}`,
+            );
+          },
         },
-      });
+        hostArg,
+      );
   if (!outcome.ok) fail(outcome.error, outcome.hint);
 
   writePeerClientConfig({ root: outcome.root, token: outcome.token });

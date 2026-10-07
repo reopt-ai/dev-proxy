@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import https from "node:https";
 import net from "node:net";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
@@ -45,14 +46,24 @@ export function writePeerClientConfig(cfg: PeerClientConfig): void {
 
 /**
  * Resolve how to reach the root: an explicit join wins; otherwise, if this
- * machine has a root token (i.e. it runs the proxy), talk to it on loopback.
+ * machine has a root token (i.e. it runs the proxy), talk to it on loopback —
+ * over HTTPS when the HTTP listener is off (`port: false`).
  */
-export function resolvePeerClient(localPort: number): PeerClientConfig | null {
+export function resolvePeerClient(
+  localPort: number | null,
+  localHttpsPort = 3443,
+): PeerClientConfig | null {
   const joined = readPeerClientConfig();
   if (joined) return joined;
   try {
     const token = readFileSync(PEER_TOKEN_PATH, "utf-8").trim();
-    if (token) return { root: `http://127.0.0.1:${String(localPort)}`, token };
+    if (token) {
+      const root =
+        localPort === null
+          ? `https://127.0.0.1:${String(localHttpsPort)}`
+          : `http://127.0.0.1:${String(localPort)}`;
+      return { root, token };
+    }
   } catch {
     // No local root either.
   }
@@ -80,17 +91,26 @@ export function normalizeRoot(input: string, defaultPort: number): string | null
  *
  * A bare hostname is taken as the root's dev domain: with wildcard DNS
  * `root.<domain>` reaches the root over TLS without anyone knowing its IP.
- * Anything more specific (scheme, port or IP) is used exactly as given.
+ * The root's HTTP port is unknown here, so 80 and this machine's own port
+ * are guessed next. Anything more specific (scheme, port or IP) is used
+ * exactly as given.
  */
-export function rootCandidates(input: string, defaultPort: number): string[] {
-  const exact = normalizeRoot(input, defaultPort);
+export function rootCandidates(input: string, defaultPort: number | null): string[] {
+  const guessPort = defaultPort ?? 3000;
+  const exact = normalizeRoot(input, guessPort);
   if (!exact) return [];
   if (/^https?:\/\//.test(input)) return [exact];
   const url = new URL(`http://${input}`);
   const host = url.hostname;
   if (url.port || net.isIP(host.replace(/^\[|\]$/g, "")) !== 0) return [exact];
-  if (host.startsWith("root.")) return [`https://${host}`, exact];
-  return [`https://root.${host}`, `http://root.${host}:${String(defaultPort)}`, exact];
+  const rootHost = host.startsWith("root.") ? host : `root.${host}`;
+  const candidates = [
+    `https://${rootHost}`,
+    `http://${rootHost}`,
+    `http://${rootHost}:${String(guessPort)}`,
+    exact,
+  ];
+  return [...new Set(candidates)];
 }
 
 export function defaultOwner(): string {
@@ -100,11 +120,37 @@ export function defaultOwner(): string {
 export class PeerApiError extends Error {
   constructor(
     message: string,
+    /** HTTP status when the root answered. */
     readonly status?: number,
+    /** Socket/TLS error code (`ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT`, `CERT_*`…) when it did not. */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "PeerApiError";
   }
+}
+
+/**
+ * fetch hides the useful part of a network failure in `cause` (and a dual-stack
+ * connect failure inside an AggregateError below that). Dig it out so callers
+ * can tell DNS, connection and certificate problems apart.
+ */
+function networkFailure(err: unknown): { code?: string; message: string } {
+  if ((err as Error).name === "TimeoutError") {
+    return { code: "ETIMEDOUT", message: "timed out" };
+  }
+  const cause = ((err as { cause?: unknown }).cause ?? err) as {
+    code?: unknown;
+    message?: unknown;
+    errors?: { code?: unknown; message?: unknown }[];
+  };
+  const first = cause.errors?.[0];
+  const code = cause.code ?? first?.code;
+  const message = cause.message ?? first?.message ?? (err as Error).message;
+  return {
+    code: typeof code === "string" ? code : undefined,
+    message: typeof message === "string" ? message : String(err),
+  };
 }
 
 interface PeersResponse {
@@ -121,26 +167,90 @@ interface PairResponse {
   domain: string;
 }
 
+const CALL_TIMEOUT_MS = 5000;
+
+interface Reply {
+  ok: boolean;
+  status: number;
+  json(): Promise<unknown>;
+}
+
+/**
+ * The root's certificate is issued for its domain, not for 127.0.0.1, so the
+ * loopback HTTPS path (root machine with the HTTP listener off) cannot verify
+ * it. Nothing can intercept a loopback socket, so skipping verification there
+ * is safe; it is never done for any other address.
+ */
+function isLoopbackHttps(root: string): boolean {
+  try {
+    const url = new URL(root);
+    return url.protocol === "https:" && url.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+function loopbackRequest(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+): Promise<Reply> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      url,
+      { method, headers, rejectUnauthorized: false, timeout: CALL_TIMEOUT_MS },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf-8");
+          const status = res.statusCode ?? 0;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(JSON.parse(text) as unknown),
+          });
+        });
+        res.on("error", reject);
+      },
+    );
+    req.on("timeout", () => {
+      req.destroy(new Error("request timed out"));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
 async function call<T = PeersResponse>(
   cfg: { root: string; token?: string },
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> {
-  let res: Response;
+  const url = `${cfg.root}/_dev-proxy/${path}`;
+  const headers = {
+    ...(cfg.token !== undefined ? { Authorization: `Bearer ${cfg.token}` } : {}),
+    ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+  };
+  const payload = body !== undefined ? JSON.stringify(body) : undefined;
+  let res: Reply;
   try {
-    res = await fetch(`${cfg.root}/_dev-proxy/${path}`, {
-      method,
-      headers: {
-        ...(cfg.token !== undefined ? { Authorization: `Bearer ${cfg.token}` } : {}),
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(5000),
-    });
+    res = isLoopbackHttps(cfg.root)
+      ? await loopbackRequest(url, method, headers, payload)
+      : await fetch(url, {
+          method,
+          headers,
+          body: payload,
+          signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+        });
   } catch (err) {
+    const failure = networkFailure(err);
     throw new PeerApiError(
-      `cannot reach root proxy at ${cfg.root}: ${(err as Error).message}`,
+      `cannot reach root proxy at ${cfg.root}: ${failure.message}`,
+      undefined,
+      failure.code,
     );
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };

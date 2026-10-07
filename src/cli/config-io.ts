@@ -50,7 +50,8 @@ function atomicWriteFileSync(filePath: string, data: string): void {
 
 export interface RawGlobalConfig {
   domain?: string;
-  port?: number;
+  /** `false` turns the HTTP listener off (HTTPS only). */
+  port?: number | false;
   httpsPort?: number;
   certPath?: string;
   keyPath?: string;

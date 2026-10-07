@@ -15,6 +15,8 @@ import {
 } from "../cli/config-io.js";
 import { Header, Check, Section } from "../cli/output.js";
 import { getLanAddresses } from "../cli/net.js";
+import { fetchPeers, PeerApiError, readPeerClientConfig } from "../cli/peer-client.js";
+import { listDevices, loadDevices } from "../proxy/pairing.js";
 
 interface CheckResult {
   ok: boolean;
@@ -134,6 +136,23 @@ function describeCert(cert: CertInfo, domain: string, now = Date.now()): CheckRe
   return results;
 }
 
+type CertKind = "public" | "mkcert" | "none";
+
+/** What kind of certificate the proxy serves — decides how peers can reach it. */
+function certKind(): CertKind {
+  const explicit = Boolean(config.certPath && config.keyPath);
+  const certFile =
+    config.certPath ?? resolve(CONFIG_DIR, "certs", `${config.domain}+1.pem`);
+  if (!existsSync(certFile)) return "none";
+  if (!explicit) return "mkcert";
+  try {
+    const cert = new X509Certificate(readFileSync(certFile));
+    return /mkcert/i.test(cert.issuer) ? "mkcert" : "public";
+  } catch {
+    return "none";
+  }
+}
+
 function checkTlsSection(): CheckResult[] {
   const results: CheckResult[] = [];
 
@@ -201,7 +220,10 @@ function checkNetworkSection(lanAddresses: string[]): CheckResult[] {
   }
   return lanAddresses.map((addr) => ({
     ok: true,
-    label: `reachable at ${addr}:${String(config.port)} (https :${String(config.httpsPort)})`,
+    label:
+      config.port === null
+        ? `reachable at https://${addr}:${String(config.httpsPort)}`
+        : `reachable at ${addr}:${String(config.port)} (https :${String(config.httpsPort)})`,
   }));
 }
 
@@ -275,7 +297,8 @@ async function checkDns(
   return results;
 }
 
-function checkPort(port: number): Promise<CheckResult> {
+function checkPort(port: number | null): Promise<CheckResult> {
+  if (port === null) return Promise.resolve({ ok: true, label: "http listener is off" });
   return new Promise((res) => {
     const server = net.createServer();
     server.once("error", () => {
@@ -287,6 +310,125 @@ function checkPort(port: number): Promise<CheckResult> {
       });
     });
   });
+}
+
+// ── Peers ────────────────────────────────────────────────────
+
+interface PeerReadiness {
+  domain: string;
+  httpPort: number | null;
+  httpsPort: number;
+  cert: CertKind;
+  /** Where `root.<domain>` resolves to, or null when it does not. */
+  rootAddress: string | null;
+  lanAddresses: string[];
+  pairedDevices: number;
+}
+
+/** Can another machine run `peer join <domain>` against this one? */
+function describePeerReadiness(r: PeerReadiness): CheckResult[] {
+  const results: CheckResult[] = [];
+  const rootHost = `root.${r.domain}`;
+
+  if (r.rootAddress === null) {
+    results.push({
+      ok: false,
+      warn: true,
+      label: `${rootHost} does not resolve — peers must use \`peer join <this machine's IP>\``,
+    });
+  } else if (classifyAddress(r.rootAddress, r.lanAddresses) === "lan") {
+    results.push({
+      ok: true,
+      label: `${rootHost} → ${r.rootAddress} (peers can find this machine by name)`,
+    });
+  } else {
+    results.push({
+      ok: false,
+      warn: true,
+      label: `${rootHost} → ${r.rootAddress} (not this machine's LAN address — peers must use \`peer join <ip>\`)`,
+    });
+  }
+
+  const httpFallback =
+    r.httpPort === null ? null : `plain HTTP on :${String(r.httpPort)}`;
+  if (r.cert === "public" && r.httpsPort === 443) {
+    results.push({ ok: true, label: `peers can join over https://${rootHost}` });
+  } else if (r.cert === "public") {
+    results.push({
+      ok: false,
+      warn: true,
+      label: `httpsPort is ${String(r.httpsPort)} — \`peer join\` ${httpFallback ? `falls back to ${httpFallback}` : "has nothing to fall back to"}; set httpsPort 443`,
+    });
+  } else if (httpFallback) {
+    results.push({
+      ok: false,
+      warn: true,
+      label: `${r.cert === "mkcert" ? "mkcert certificate is not trusted on other machines" : "no certificate"} — peers join over ${httpFallback}`,
+    });
+  } else {
+    results.push({
+      ok: false,
+      label: `${r.cert === "mkcert" ? "mkcert certificate is not trusted on other machines" : "no certificate"} and the HTTP listener is off — peers cannot join`,
+    });
+  }
+
+  results.push({
+    ok: true,
+    label: `${String(r.pairedDevices)} paired machine(s)`,
+  });
+  return results;
+}
+
+async function lookupRoot(domain: string): Promise<string | null> {
+  try {
+    const { address } = await withTimeout(
+      dns.promises.lookup(`root.${domain}`, { family: 4 }),
+      5000,
+    );
+    return address;
+  } catch {
+    return null;
+  }
+}
+
+/** This machine joined a root: does the root still accept it? */
+async function checkJoinedRoot(): Promise<CheckResult | null> {
+  const joined = readPeerClientConfig();
+  if (!joined) return null;
+  try {
+    const { peers } = await fetchPeers(joined);
+    return {
+      ok: true,
+      label: `joined ${joined.root} (${String(Object.keys(peers).length)} claim(s) on the root)`,
+    };
+  } catch (err) {
+    if (err instanceof PeerApiError && err.status === 401) {
+      return {
+        ok: false,
+        label: `${joined.root} no longer accepts this machine — run \`peer join\` again`,
+      };
+    }
+    return { ok: false, label: (err as Error).message };
+  }
+}
+
+async function checkPeersSection(): Promise<CheckResult[]> {
+  loadDevices();
+  const [rootAddress, joined] = await Promise.all([
+    lookupRoot(config.domain),
+    checkJoinedRoot(),
+  ]);
+  const results = describePeerReadiness({
+    domain: config.domain,
+    httpPort: config.port,
+    httpsPort: config.httpsPort,
+    cert: certKind(),
+    rootAddress,
+    lanAddresses,
+    pairedDevices: listDevices().size,
+  });
+  if (joined) results.push(joined);
+  return results;
 }
 
 // ── Worktree checks ──────────────────────────────────────────
@@ -448,6 +590,7 @@ function Doctor() {
   const [asyncChecks, setAsyncChecks] = useState<{
     dns: CheckResult[];
     ports: CheckResult[];
+    peers: CheckResult[];
     worktreePorts: CheckResult[];
   } | null>(null);
 
@@ -461,10 +604,11 @@ function Doctor() {
     let cancelled = false;
     void (async () => {
       const subdomains = collectSubdomains(config.projects);
-      const [dnsResults, httpPort, httpsPort, wtPorts] = await Promise.all([
+      const [dnsResults, httpPort, httpsPort, peers, wtPorts] = await Promise.all([
         checkDns(subdomains, config.domain, lanAddresses),
         checkPort(config.port),
         checkPort(config.httpsPort),
+        checkPeersSection(),
         checkWorktreePorts(config.projects),
       ]);
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated in cleanup
@@ -472,6 +616,7 @@ function Doctor() {
         setAsyncChecks({
           dns: dnsResults,
           ports: [httpPort, httpsPort],
+          peers,
           worktreePorts: wtPorts,
         });
       }
@@ -495,6 +640,7 @@ function Doctor() {
     ...worktreeChecks,
     ...(asyncChecks?.dns ?? []),
     ...(asyncChecks?.ports ?? []),
+    ...(asyncChecks?.peers ?? []),
     ...(asyncChecks?.worktreePorts ?? []),
   ];
 
@@ -558,6 +704,16 @@ function Doctor() {
         )}
       </Section>
 
+      <Section title="Peers">
+        {asyncChecks ? (
+          asyncChecks.peers.map((c) => (
+            <Check key={c.label} ok={c.ok} warn={c.warn} label={c.label} />
+          ))
+        ) : (
+          <Text dimColor>{"    checking..."}</Text>
+        )}
+      </Section>
+
       {(worktreeChecks.length > 0 || (asyncChecks?.worktreePorts.length ?? 0) > 0) && (
         <Section title="Worktrees">
           {worktreeChecks.map((c) => (
@@ -605,4 +761,6 @@ export const __testing = {
   classifyAddress,
   describeDnsResult,
   describeCert,
+  describePeerReadiness,
+  checkJoinedRoot,
 };

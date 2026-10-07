@@ -177,7 +177,7 @@ export function Splash({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
         {/* Port + prompt */}
         <Box justifyContent="center" marginTop={1}>
           <Text color={palette.accent} bold>
-            LISTENING :{PROXY_PORT}
+            LISTENING{PROXY_PORT !== null && ` :${String(PROXY_PORT)}`}
           </Text>
           {httpsEnabled && (
             <>

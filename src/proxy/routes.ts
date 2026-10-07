@@ -113,10 +113,17 @@ export function rebuildRoutes(): void {
 
 // ── Static exports (server-level, require restart) ──────────
 
+/** Plain-HTTP port, or `null` when the HTTP listener is turned off. */
 export const PROXY_PORT = config.port;
 export const HTTPS_PORT = config.httpsPort;
 export const CERT_PATH = config.certPath;
 export const KEY_PATH = config.keyPath;
+
+/** `http://*.<domain>:<port>` to show people — https without a port suffix when HTTP is off. */
+export function exampleOrigin(): string {
+  if (PROXY_PORT !== null) return `http://*.${DOMAIN}:${String(PROXY_PORT)}`;
+  return `https://*.${DOMAIN}${HTTPS_PORT === 443 ? "" : `:${String(HTTPS_PORT)}`}`;
+}
 
 // ── Dynamic exports (reflect latest routes) ─────────────────
 

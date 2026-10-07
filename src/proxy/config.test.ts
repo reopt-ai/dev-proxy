@@ -30,6 +30,7 @@ const { __testing, CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME, reloadCo
 
 const {
   parsePort,
+  parseOptionalPort,
   resolveFilePath,
   loadJson,
   loadProjectConfig,
@@ -91,6 +92,20 @@ describe("parsePort", () => {
   it("logs error with label when rejecting", () => {
     parsePort("httpsPort", 99999, 3443);
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("httpsPort"));
+  });
+
+  it("rejects non-numbers", () => {
+    expect(parsePort("port", "3000", 3000)).toBe(3000);
+    expect(parsePort("port", true, 3000)).toBe(3000);
+  });
+});
+
+describe("parseOptionalPort", () => {
+  it("maps false to null (listener off) and otherwise parses like a port", () => {
+    expect(parseOptionalPort("port", false, 3000)).toBeNull();
+    expect(parseOptionalPort("port", undefined, 3000)).toBe(3000);
+    expect(parseOptionalPort("port", 80, 3000)).toBe(80);
+    expect(parseOptionalPort("port", "off", 3000)).toBe(3000);
   });
 });
 

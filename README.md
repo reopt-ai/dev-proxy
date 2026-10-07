@@ -118,7 +118,13 @@ Config lives in three files for new setups:
 }
 ```
 
-`port` and `httpsPort` can be 80 and 443 so URLs need no port suffix (`dev-proxy config set httpsPort 443`). macOS lets an unprivileged process bind them; on Linux, ports below 1024 need extra privileges.
+`port` and `httpsPort` can be 80 and 443 so URLs need no port suffix (`dev-proxy config set httpsPort 443`). macOS lets an unprivileged process bind them; on Linux, grant Node the capability once instead of running the proxy as root:
+
+```bash
+sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v node)")"
+```
+
+`"port": false` (`dev-proxy config set port off`) turns the plain-HTTP listener off so the proxy serves HTTPS only. It needs a certificate; `dev-proxy` refuses to start without one. Keep HTTP on when anything that does not trust your certificate — `curl`, Node scripts, Docker containers, a peer joining a mkcert root — has to reach the proxy.
 
 Optional keys:
 
@@ -219,9 +225,9 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # claim studio while 
 
 `peer join <domain>` reaches the root at `https://root.<domain>` (the wildcard record already resolves it, so nobody needs the root's IP) and asks to pair. The root's TUI shows the machine's name, address and the same code; press `A` then `Y` there to approve, or `D` to deny. No secret is copied by hand: the peer generates its own token and the root stores only its hash. On the root, `dev-proxy peer devices` lists paired machines and `dev-proxy peer revoke <name>` unpairs one and releases the subdomains it had claimed.
 
-`https://root.<domain>` needs the root's `httpsPort` to be 443; otherwise `peer join` falls back to plain HTTP on the proxy port. Without wildcard DNS, pass an address instead (`peer join 192.168.1.10`). `--token <token>` skips the approval using the root's own token from `~/.dev-proxy/peer-token`, which is useful for unattended setups.
+`https://root.<domain>` needs the root's `httpsPort` to be 443 and a certificate the peer trusts — a mkcert certificate is not, so `peer join` then falls back to plain HTTP on `root.<domain>` (port 80, then the proxy port). Without wildcard DNS, pass an address instead (`peer join 192.168.1.10`). `--token <token>` skips the approval using the root's own token from `~/.dev-proxy/peer-token`, which is useful for unattended setups. `dev-proxy doctor` on the root has a **Peers** section that says which of these paths peers can use; on a joined machine it checks that the root still accepts its token.
 
-`peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
+`peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost` — Next.js does by default, Vite needs `vite --host`, and most other dev servers take `--host 0.0.0.0` or `HOST=0.0.0.0`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
 
 Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy port) only answers callers from loopback or private networks, refuses requests sent by a browser, and requires a bearer token for everything except the pair request itself.
 
@@ -381,6 +387,20 @@ lsof -ti :3000 | xargs kill
 # Or change the proxy port in ~/.dev-proxy/config.json
 # ("port": 3080)
 ```
+
+### `peer join` cannot reach the root
+
+The error names the failure; the usual causes, in order:
+
+| Message                                   | Cause                                                                                | Fix                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `… does not resolve on this machine`      | typo in the domain, or the router drops public DNS answers that point at private IPs | check the spelling; allow the domain in the router's DNS rebinding protection, or `peer join <root's LAN IP>` |
+| `… presented a certificate … not trust`   | the root uses a mkcert certificate                                                   | join with the root's LAN IP (plain HTTP), or give the root a publicly trusted certificate                     |
+| `… refused the connection`                | dev-proxy is not running on the root, or its `httpsPort` is not 443                  | start it; `dev-proxy config set httpsPort 443` on the root, or pass `host:port`                               |
+| `… did not answer`                        | different network, VPN, guest Wi-Fi or a firewall in between                         | put both machines on the same LAN                                                                             |
+| `the root proxy does not support pairing` | the root runs a dev-proxy older than 1.11                                            | upgrade it, or pass `--token`                                                                                 |
+
+On the root, `dev-proxy doctor` → **Peers** reports the same from the other side.
 
 ### mkcert not found
 

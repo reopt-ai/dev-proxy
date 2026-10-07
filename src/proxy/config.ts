@@ -15,7 +15,8 @@ export const JS_CONFIG_NAMES = ["dev-proxy.config.mjs", "dev-proxy.config.js"];
 /** Raw shape of ~/.dev-proxy/config.json */
 interface RawGlobalConfig {
   domain?: string;
-  port?: number;
+  /** Plain-HTTP port; `false` turns the HTTP listener off (HTTPS only). */
+  port?: number | false;
   httpsPort?: number;
   certPath?: string;
   keyPath?: string;
@@ -49,7 +50,8 @@ export interface ProjectConfig {
 
 export interface ResolvedConfig {
   domain: string;
-  port: number;
+  /** `null` when the HTTP listener is turned off. */
+  port: number | null;
   httpsPort: number;
   certPath?: string;
   keyPath?: string;
@@ -78,13 +80,21 @@ function resolveFilePath(
   return resolve(dirname(basePath), rawPath);
 }
 
-function parsePort(label: string, raw: number | undefined, fallback: number): number {
+function parsePort(label: string, raw: unknown, fallback: number): number {
   if (raw === undefined) return fallback;
-  if (Number.isInteger(raw) && raw > 0 && raw <= 65535) return raw;
+  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0 && raw <= 65535) {
+    return raw;
+  }
   console.error(
-    `[dev-proxy] Ignoring ${label}: expected integer port, received "${raw}"`,
+    `[dev-proxy] Ignoring ${label}: expected integer port, received ${JSON.stringify(raw)}`,
   );
   return fallback;
+}
+
+/** Like parsePort, but `false` means "no listener". */
+function parseOptionalPort(label: string, raw: unknown, fallback: number): number | null {
+  if (raw === false) return null;
+  return parsePort(label, raw, fallback);
 }
 
 // ── Config file resolution ──────────────────────────────────
@@ -171,7 +181,7 @@ async function loadConfig(): Promise<ResolvedConfig> {
   const global = (loadJson(GLOBAL_CONFIG_PATH) as RawGlobalConfig | null) ?? {};
 
   const domain = global.domain ?? "localhost";
-  const port = parsePort("port", global.port, 3000);
+  const port = parseOptionalPort("port", global.port, 3000);
   const httpsPort = parsePort("httpsPort", global.httpsPort, 3443);
   const certPath = resolveFilePath(global.certPath, GLOBAL_CONFIG_PATH);
   const keyPath = resolveFilePath(global.keyPath, GLOBAL_CONFIG_PATH);
@@ -206,6 +216,7 @@ export async function reloadConfig(): Promise<ResolvedConfig> {
 
 export const __testing = {
   parsePort,
+  parseOptionalPort,
   resolveFilePath,
   loadJson,
   loadWorktrees,

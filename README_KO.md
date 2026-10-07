@@ -118,7 +118,13 @@ cd dev-proxy && pnpm install && pnpm proxy
 }
 ```
 
-`port`와 `httpsPort`를 80과 443으로 두면 URL에 포트를 붙이지 않아도 됩니다(`dev-proxy config set httpsPort 443`). macOS는 일반 권한 프로세스도 이 포트를 열 수 있고, Linux에서는 1024 미만 포트에 추가 권한이 필요합니다.
+`port`와 `httpsPort`를 80과 443으로 두면 URL에 포트를 붙이지 않아도 됩니다(`dev-proxy config set httpsPort 443`). macOS는 일반 권한 프로세스도 이 포트를 열 수 있고, Linux에서는 프록시를 root로 띄우는 대신 Node에 한 번만 권한을 주면 됩니다:
+
+```bash
+sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v node)")"
+```
+
+`"port": false`(`dev-proxy config set port off`)로 두면 평문 HTTP 리스너를 끄고 HTTPS만 서빙합니다. 인증서가 필요하며, 없으면 `dev-proxy`가 시작을 거부합니다. 인증서를 신뢰하지 않는 클라이언트(`curl`, Node 스크립트, Docker 컨테이너, mkcert 루트에 join하는 피어)가 프록시에 접근해야 한다면 HTTP를 켜 두세요.
 
 선택 항목:
 
@@ -219,9 +225,9 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # pnpm dev가 도는 
 
 `peer join <도메인>`은 `https://root.<도메인>`으로 루트에 접속해(와일드카드 레코드가 이미 해석해 주므로 루트의 IP를 알 필요가 없습니다) 페어링을 요청합니다. 루트의 TUI에 머신 이름, 주소, 같은 코드가 표시되며, 거기서 `A`를 누른 뒤 `Y`로 확인하면 승인, `D`를 누르면 거절입니다. 손으로 복사할 비밀 값은 없습니다. 피어가 토큰을 직접 만들고 루트는 그 해시만 저장합니다. 루트에서 `dev-proxy peer devices`로 페어링된 머신을 보고 `dev-proxy peer revoke <이름>`으로 해제하며, 그 머신이 claim한 서브도메인도 함께 풀립니다.
 
-`https://root.<도메인>`은 루트의 `httpsPort`가 443이어야 하며, 아니면 `peer join`이 프록시 포트의 평문 HTTP로 대신 접속합니다. 와일드카드 DNS가 없으면 주소를 넘기세요(`peer join 192.168.1.10`). `--token <토큰>`은 루트의 `~/.dev-proxy/peer-token` 값으로 승인 절차를 건너뛰며, 사람이 없는 자동 설정에 씁니다.
+`https://root.<도메인>`은 루트의 `httpsPort`가 443이고 피어가 신뢰하는 인증서여야 합니다. mkcert 인증서는 신뢰되지 않으므로 그 경우 `peer join`은 `root.<도메인>`의 평문 HTTP(80, 그다음 프록시 포트)로 대신 접속합니다. 와일드카드 DNS가 없으면 주소를 넘기세요(`peer join 192.168.1.10`). `--token <토큰>`은 루트의 `~/.dev-proxy/peer-token` 값으로 승인 절차를 건너뛰며, 사람이 없는 자동 설정에 씁니다. 루트에서 `dev-proxy doctor`의 **Peers** 섹션이 피어가 어떤 경로로 접속할 수 있는지 알려주고, join한 머신에서는 루트가 아직 토큰을 받아주는지 확인합니다.
 
-`peer run`은 명령이 시작될 때 `studio.<도메인>` → `http://<이 머신의 LAN IP>:3001`을 claim하고, 명령이 끝나면(Ctrl+C 포함) 해제합니다. 앱의 `dev` 스크립트에 넣어 두면 개발자는 평소처럼 `pnpm dev`만 치면 됩니다. 앱은 `localhost`가 아니라 `0.0.0.0`에 바인드해야 합니다. `peer claim` / `peer release`는 명령을 감싸지 않고 같은 일을 하고, `peer list`는 모든 claim을 소유자·도달 가능 여부와 함께 보여줍니다.
+`peer run`은 명령이 시작될 때 `studio.<도메인>` → `http://<이 머신의 LAN IP>:3001`을 claim하고, 명령이 끝나면(Ctrl+C 포함) 해제합니다. 앱의 `dev` 스크립트에 넣어 두면 개발자는 평소처럼 `pnpm dev`만 치면 됩니다. 앱은 `localhost`가 아니라 `0.0.0.0`에 바인드해야 합니다. Next.js는 기본값이 그렇고, Vite는 `vite --host`가 필요하며, 대부분의 다른 개발 서버는 `--host 0.0.0.0`이나 `HOST=0.0.0.0`을 받습니다. `peer claim` / `peer release`는 명령을 감싸지 않고 같은 일을 하고, `peer list`는 모든 claim을 소유자·도달 가능 여부와 함께 보여줍니다.
 
 규칙: claim은 같은 서브도메인의 루트 로컬 라우트보다 우선합니다. 나중 claim이 이기며 이전 소유자가 표시됩니다. 루트는 30초마다 claim 대상을 프로브하고 10분간 응답이 없으면 claim을 삭제합니다. 컨트롤 API(프록시 포트의 `/_dev-proxy/…`)는 루프백·사설망에서 온 요청에만 응답하고, 브라우저가 보낸 요청은 거부하며, 페어링 요청을 제외한 모든 호출에 bearer 토큰이 필요합니다.
 
@@ -381,6 +387,20 @@ lsof -ti :3000 | xargs kill
 # 또는 ~/.dev-proxy/config.json에서 프록시 포트 변경
 # ("port": 3080)
 ```
+
+### `peer join`이 루트에 접속하지 못함
+
+에러 메시지가 실패 원인을 말해 줍니다. 흔한 순서대로:
+
+| 메시지                                    | 원인                                                               | 해결                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `… does not resolve on this machine`      | 도메인 오타, 또는 공유기가 사설 IP를 가리키는 공용 DNS 응답을 버림 | 철자 확인; 공유기의 DNS 리바인딩 보호에서 도메인 허용, 또는 `peer join <루트의 LAN IP>` |
+| `… presented a certificate … not trust`   | 루트가 mkcert 인증서를 사용                                        | 루트의 LAN IP로 join(평문 HTTP), 또는 루트에 공인 인증서 적용                           |
+| `… refused the connection`                | 루트에서 dev-proxy가 꺼져 있거나 `httpsPort`가 443이 아님          | 실행; 루트에서 `dev-proxy config set httpsPort 443`, 또는 `host:port` 지정              |
+| `… did not answer`                        | 다른 네트워크, VPN, 게스트 Wi-Fi, 방화벽                           | 두 머신을 같은 LAN에 두기                                                               |
+| `the root proxy does not support pairing` | 루트의 dev-proxy가 1.11 이전 버전                                  | 업그레이드, 또는 `--token` 사용                                                         |
+
+루트에서는 `dev-proxy doctor` → **Peers**가 반대편에서 같은 내용을 보여줍니다.
 
 ### mkcert를 찾을 수 없음
 

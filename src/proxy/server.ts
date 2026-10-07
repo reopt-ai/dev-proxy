@@ -424,18 +424,22 @@ function createUpgradeHandler(
 }
 
 export function createProxyServer(): {
-  server: http.Server;
+  /** `null` when the HTTP listener is turned off (`port: false`). */
+  server: http.Server | null;
   httpsServer: https.Server | null;
   emitter: ProxyEmitter;
 } {
   const emitter: ProxyEmitter = new EventEmitter();
   const handleControl = createControlHandler(ensurePeerToken());
 
-  const server = http.createServer(createRequestHandler(emitter, "http", handleControl));
-  server.on("upgrade", createUpgradeHandler(emitter, "http"));
-  server.on("error", (err) => {
-    console.error(`[dev-proxy] HTTP server error: ${err.message}`);
-  });
+  let server: http.Server | null = null;
+  if (PROXY_PORT !== null) {
+    server = http.createServer(createRequestHandler(emitter, "http", handleControl));
+    server.on("upgrade", createUpgradeHandler(emitter, "http"));
+    server.on("error", (err) => {
+      console.error(`[dev-proxy] HTTP server error: ${err.message}`);
+    });
+  }
 
   let httpsServer: https.Server | null = null;
   const certs = resolveCerts(CERT_PATH, KEY_PATH);
@@ -519,13 +523,20 @@ export function destroyAgents(): void {
 }
 
 export function startProxyServer(
-  server: http.Server,
+  server: http.Server | null,
   httpsServer: https.Server | null,
 ): Promise<void> {
+  if (!server && !httpsServer) {
+    return Promise.reject(
+      new Error(
+        "nothing to listen on — port is off and no certificate was found for HTTPS",
+      ),
+    );
+  }
   return new Promise((resolve, reject) => {
     const fail = (err: Error, port: number) => {
       try {
-        server.close();
+        server?.close();
       } catch {
         /* ignored: best-effort cleanup */
       }
@@ -537,26 +548,32 @@ export function startProxyServer(
       reject(formatListenError(err, port));
     };
 
-    const failHttp = (err: Error) => {
-      fail(err, PROXY_PORT);
-    };
     const failHttps = (err: Error) => {
       fail(err, HTTPS_PORT);
     };
-
-    server.once("error", failHttp);
-    server.listen(PROXY_PORT, () => {
-      if (httpsServer) {
-        httpsServer.once("error", failHttps);
-        httpsServer.listen(HTTPS_PORT, () => {
-          server.off("error", failHttp);
-          httpsServer.off("error", failHttps);
-          resolve();
-        });
-      } else {
-        server.off("error", failHttp);
+    const listenHttps = () => {
+      if (!httpsServer) {
         resolve();
+        return;
       }
+      httpsServer.once("error", failHttps);
+      httpsServer.listen(HTTPS_PORT, () => {
+        httpsServer.off("error", failHttps);
+        resolve();
+      });
+    };
+
+    if (!server) {
+      listenHttps();
+      return;
+    }
+    const failHttp = (err: Error) => {
+      fail(err, PROXY_PORT ?? 0);
+    };
+    server.once("error", failHttp);
+    server.listen(PROXY_PORT ?? 0, () => {
+      server.off("error", failHttp);
+      listenHttps();
     });
   });
 }

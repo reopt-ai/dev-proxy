@@ -53,6 +53,27 @@ vi.mock("node:crypto", () => ({
   X509Certificate: vi.fn(),
 }));
 
+const fetchPeersMock = vi.fn();
+const readPeerClientConfigMock = vi.fn();
+class PeerApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+vi.mock("../cli/peer-client.js", () => ({
+  fetchPeers: (...args: unknown[]) => fetchPeersMock(...args) as unknown,
+  readPeerClientConfig: () => readPeerClientConfigMock() as unknown,
+  PeerApiError,
+}));
+
+vi.mock("../proxy/pairing.js", () => ({
+  loadDevices: vi.fn(),
+  listDevices: () => new Map(),
+}));
+
 // Mock ink to prevent rendering side effects
 vi.mock("ink", () => ({
   render: vi.fn(),
@@ -74,12 +95,16 @@ const {
   classifyAddress,
   describeDnsResult,
   describeCert,
+  describePeerReadiness,
+  checkJoinedRoot,
 } = __testing;
 
 // ── Lifecycle ──────────────────────────────────────────────
 
 beforeEach(() => {
   readProjectConfigMock.mockReset();
+  fetchPeersMock.mockReset();
+  readPeerClientConfigMock.mockReset();
 });
 
 afterEach(() => {
@@ -607,5 +632,106 @@ describe("describeCert", () => {
     expect(results[2]?.ok).toBe(false);
     expect(results[2]?.warn).toBeUndefined();
     expect(results[2]?.label).toContain("expired");
+  });
+});
+
+// ── describePeerReadiness ──────────────────────────────────
+
+describe("describePeerReadiness", () => {
+  const base = {
+    domain: "test.dev",
+    httpPort: 3000 as number | null,
+    httpsPort: 443,
+    cert: "public" as const,
+    rootAddress: "192.168.1.5" as string | null,
+    lanAddresses: ["192.168.1.5"],
+    pairedDevices: 2,
+  };
+  const labels = (r: ReturnType<typeof describePeerReadiness>) => r.map((c) => c.label);
+
+  it("is all green with public DNS, a public certificate and 443", () => {
+    const results = describePeerReadiness(base);
+    expect(results.every((c) => c.ok)).toBe(true);
+    expect(labels(results)).toEqual([
+      "root.test.dev → 192.168.1.5 (peers can find this machine by name)",
+      "peers can join over https://root.test.dev",
+      "2 paired machine(s)",
+    ]);
+  });
+
+  it("warns when root.<domain> does not point at this machine", () => {
+    expect(describePeerReadiness({ ...base, rootAddress: null })[0]).toMatchObject({
+      ok: false,
+      warn: true,
+      label: expect.stringContaining("does not resolve") as string,
+    });
+    expect(describePeerReadiness({ ...base, rootAddress: "10.0.0.9" })[0]).toMatchObject({
+      ok: false,
+      warn: true,
+      label: expect.stringContaining("not this machine's LAN address") as string,
+    });
+  });
+
+  it("warns about a non-443 https port and names the fallback", () => {
+    expect(describePeerReadiness({ ...base, httpsPort: 3443 })[1]).toMatchObject({
+      warn: true,
+      label:
+        "httpsPort is 3443 — `peer join` falls back to plain HTTP on :3000; set httpsPort 443",
+    });
+    expect(
+      describePeerReadiness({ ...base, httpsPort: 3443, httpPort: null })[1],
+    ).toMatchObject({
+      label: expect.stringContaining("has nothing to fall back to") as string,
+    });
+  });
+
+  it("explains mkcert and missing certificates", () => {
+    expect(describePeerReadiness({ ...base, cert: "mkcert" })[1]).toMatchObject({
+      ok: false,
+      warn: true,
+      label:
+        "mkcert certificate is not trusted on other machines — peers join over plain HTTP on :3000",
+    });
+    expect(describePeerReadiness({ ...base, cert: "none", httpPort: null })[1]).toEqual({
+      ok: false,
+      label: "no certificate and the HTTP listener is off — peers cannot join",
+    });
+  });
+});
+
+// ── checkJoinedRoot ────────────────────────────────────────
+
+describe("checkJoinedRoot", () => {
+  it("is silent when this machine has not joined a root", async () => {
+    readPeerClientConfigMock.mockReturnValue(null);
+    await expect(checkJoinedRoot()).resolves.toBeNull();
+  });
+
+  it("reports the root and its claims when the token still works", async () => {
+    readPeerClientConfigMock.mockReturnValue({ root: "https://root.d", token: "t" });
+    fetchPeersMock.mockResolvedValue({ domain: "d", peers: { a: {}, b: {} } });
+    await expect(checkJoinedRoot()).resolves.toEqual({
+      ok: true,
+      label: "joined https://root.d (2 claim(s) on the root)",
+    });
+  });
+
+  it("tells the user to re-join when the root revoked the token", async () => {
+    readPeerClientConfigMock.mockReturnValue({ root: "https://root.d", token: "t" });
+    fetchPeersMock.mockRejectedValue(
+      new PeerApiError("invalid or missing bearer token", 401),
+    );
+    await expect(checkJoinedRoot()).resolves.toMatchObject({
+      ok: false,
+      label: expect.stringContaining("run `peer join` again") as string,
+    });
+
+    fetchPeersMock.mockRejectedValue(
+      new PeerApiError("cannot reach root proxy at https://root.d: timed out"),
+    );
+    await expect(checkJoinedRoot()).resolves.toEqual({
+      ok: false,
+      label: "cannot reach root proxy at https://root.d: timed out",
+    });
   });
 });

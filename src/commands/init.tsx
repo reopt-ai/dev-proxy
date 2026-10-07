@@ -97,7 +97,7 @@ interface BuildGlobalConfigInput {
 }
 
 interface BuildGlobalConfigResult {
-  config: { domain: string; port: number; httpsPort: number; projects: string[] };
+  config: { domain: string; port: number | false; httpsPort: number; projects: string[] };
   message: string;
 }
 
@@ -290,7 +290,7 @@ function InitWizard() {
   const [step, setStep] = useState<Step>(hasGlobal ? "projectPath" : "domain");
   const [domain, setDomain] = useState(hasGlobal ? (existing.domain ?? "") : "");
   const [httpPort, setHttpPort] = useState(
-    hasGlobal ? String(existing.port ?? 3000) : "",
+    hasGlobal ? String(existing.port === false ? 3000 : (existing.port ?? 3000)) : "",
   );
   const [httpsPort, setHttpsPort] = useState(
     hasGlobal ? String(existing.httpsPort ?? 3443) : "",
