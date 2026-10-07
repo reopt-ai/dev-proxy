@@ -216,6 +216,16 @@ mkcert가 설치되어 있으면 첫 실행 시 와일드카드 인증서를 자
 
 공개 DNS가 한 머신(**루트**)을 가리키는 구성에서, 두 번째 머신은 프록시를 띄우지 않고 hosts 파일도 건드리지 않은 채 서브도메인 하나를 넘겨받을 수 있습니다. 루트가 그 서브도메인을 피어의 앱 포트로 전달하고, TLS·인스펙터·호스트 이름은 모두 루트에 그대로 남으므로 쿠키, OAuth 리다이렉트 URI, CORS 허용 목록이 바뀌지 않습니다.
 
+루트에 필요한 것, 편한 순서대로:
+
+| 루트 구성                                                    | 피어가 join하는 방법                             |
+| ------------------------------------------------------------ | ------------------------------------------------ |
+| 공용 와일드카드 DNS + Let's Encrypt 인증서 + `httpsPort` 443 | `peer join example.dev` — IP도, 설정도 필요 없음 |
+| 공용 와일드카드 DNS, mkcert 인증서                           | `peer join example.dev` — HTTP로 폴백            |
+| 와일드카드 DNS 없음(`localhost` 또는 hosts 파일 구성)        | `peer join <루트의 LAN IP>`                      |
+
+인증서가 공인 CA 발급이 아니라면 루트는 평문 HTTP 리스너를 켜 둬야 합니다. 루트에서 `dev-proxy doctor` → **Peers**가 지금 어느 행에 해당하는지 알려줍니다.
+
 피어에서는:
 
 ```bash
@@ -229,7 +239,7 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # pnpm dev가 도는 
 
 `peer run`은 명령이 시작될 때 `studio.<도메인>` → `http://<이 머신의 LAN IP>:3001`을 claim하고, 명령이 끝나면(Ctrl+C 포함) 해제합니다. 앱의 `dev` 스크립트에 넣어 두면 개발자는 평소처럼 `pnpm dev`만 치면 됩니다. 앱은 `localhost`가 아니라 `0.0.0.0`에 바인드해야 합니다. Next.js는 기본값이 그렇고, Vite는 `vite --host`가 필요하며, 대부분의 다른 개발 서버는 `--host 0.0.0.0`이나 `HOST=0.0.0.0`을 받습니다. `peer claim` / `peer release`는 명령을 감싸지 않고 같은 일을 하고, `peer list`는 모든 claim을 소유자·도달 가능 여부와 함께 보여줍니다.
 
-규칙: claim은 같은 서브도메인의 루트 로컬 라우트보다 우선합니다. 나중 claim이 이기며 이전 소유자가 표시됩니다. 루트는 30초마다 claim 대상을 프로브하고 10분간 응답이 없으면 claim을 삭제합니다. 컨트롤 API(프록시 포트의 `/_dev-proxy/…`)는 루프백·사설망에서 온 요청에만 응답하고, 브라우저가 보낸 요청은 거부하며, 페어링 요청을 제외한 모든 호출에 bearer 토큰이 필요합니다.
+규칙: claim은 같은 서브도메인의 루트 로컬 라우트보다 우선합니다. 나중 claim이 이기며 이전 소유자가 표시됩니다. 루트는 30초마다 claim 대상을 프로브하고 10분간 응답이 없으면 claim을 삭제합니다. 컨트롤 API(프록시 포트들의 `/_dev-proxy/…`)는 루프백·사설망에서 온 요청에만 응답하고, 브라우저가 보낸 요청은 거부하며, 페어링 요청을 제외한 모든 호출에 bearer 토큰이 필요합니다.
 
 ### Worktree 라우팅
 
@@ -450,7 +460,7 @@ Next.js 서비스로 라우팅되는 서브도메인마다 하나씩 추가합�
 | `dev-proxy status`                             | 현재 설정 및 라우팅 테이블                                                                  |
 | `dev-proxy doctor`                             | 환경 진단                                                                                   |
 | `dev-proxy config`                             | 글로벌 설정 조회                                                                            |
-| `dev-proxy config set <key> <value>`           | 글로벌 설정 수정 (domain, port, httpsPort)                                                  |
+| `dev-proxy config set <key> <value>`           | 글로벌 설정 수정 (domain, port, httpsPort; HTTPS 전용은 `port off`)                         |
 | `dev-proxy project add [path]`                 | 프로젝트 등록 (기본: cwd)                                                                   |
 | `dev-proxy project remove <path>`              | 프로젝트 해제                                                                               |
 | `dev-proxy project list`                       | 등록된 프로젝트 목록                                                                        |

@@ -216,6 +216,16 @@ In every setup, run `dev-proxy doctor`: the **Network** section shows the addres
 
 With public DNS pointing at one machine (the **root**), a second machine can take over a subdomain without running a proxy and without anyone touching hosts files. The root routes the subdomain to the peer's app port; TLS, the inspector and every hostname stay on the root, so cookies, OAuth redirect URIs and CORS allow-lists do not change.
 
+What the root needs, from most to least convenient:
+
+| Root setup                                                        | How peers join                               |
+| ----------------------------------------------------------------- | -------------------------------------------- |
+| public wildcard DNS + Let's Encrypt certificate + `httpsPort` 443 | `peer join example.dev` — no IP, no setup    |
+| public wildcard DNS, mkcert certificate                           | `peer join example.dev` — falls back to HTTP |
+| no wildcard DNS (`localhost` or hosts-file setups)                | `peer join <root's LAN IP>`                  |
+
+The root must keep its plain-HTTP listener on unless its certificate is publicly trusted. `dev-proxy doctor` → **Peers** on the root tells you which row you are in.
+
 On the peer:
 
 ```bash
@@ -229,7 +239,7 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # claim studio while 
 
 `peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost` — Next.js does by default, Vite needs `vite --host`, and most other dev servers take `--host 0.0.0.0` or `HOST=0.0.0.0`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
 
-Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy port) only answers callers from loopback or private networks, refuses requests sent by a browser, and requires a bearer token for everything except the pair request itself.
+Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy ports) only answers callers from loopback or private networks, refuses requests sent by a browser, and requires a bearer token for everything except the pair request itself.
 
 ### Worktree Routing
 
@@ -450,7 +460,7 @@ If you see `Raw mode is not supported`, you're running in a non-TTY context (e.g
 | `dev-proxy status`                             | Show configuration and routing table                                                            |
 | `dev-proxy doctor`                             | Run environment diagnostics                                                                     |
 | `dev-proxy config`                             | View global settings                                                                            |
-| `dev-proxy config set <key> <value>`           | Modify global settings (domain, port, httpsPort)                                                |
+| `dev-proxy config set <key> <value>`           | Modify global settings (domain, port, httpsPort; `port off` for HTTPS only)                     |
 | `dev-proxy project add [path]`                 | Register a project (default: cwd)                                                               |
 | `dev-proxy project remove <path>`              | Unregister a project                                                                            |
 | `dev-proxy project list`                       | List registered projects                                                                        |

@@ -344,7 +344,11 @@ and `peer run` lives only as long as the dev server it wraps. The root checks
 that a claim is still alive by probing the app's port itself.
 
 1. Ask the user for the root's dev domain (or its LAN address when there is
-   no wildcard DNS).
+   no wildcard DNS). `peer join <domain>` only works end-to-end when the
+   root has public wildcard DNS; with a publicly trusted certificate and
+   `httpsPort` 443 it goes over TLS, with mkcert it falls back to plain HTTP.
+   If the user is unsure, have them run `dev-proxy doctor` on the root and
+   read its **Peers** section.
 2. Join once. The command prints a code and waits until someone presses `A`
    and then `Y` in dev-proxy on the root machine — tell the user to approve it there and
    to check that the code matches:
