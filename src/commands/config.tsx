@@ -17,7 +17,7 @@ function ConfigView() {
       <ExitOnRender />
       <Header text="Global Configuration" />
       <Row label="domain" value={cfg.domain ?? "localhost"} />
-      <Row label="port" value={String(cfg.port ?? 3000)} />
+      <Row label="port" value={cfg.port === false ? "off" : String(cfg.port ?? 3000)} />
       <Row label="httpsPort" value={String(cfg.httpsPort ?? 3443)} />
       <Row
         label="projects"
@@ -46,11 +46,17 @@ function ConfigSet({ configKey, value }: { configKey: string; value: string }) {
 
     if (configKey === "domain") {
       cfg.domain = value;
+    } else if (configKey === "port" && (value === "off" || value === "false")) {
+      // HTTPS only — the proxy refuses to start without a certificate.
+      cfg.port = false;
     } else {
       const num = Number(value);
       if (!Number.isInteger(num) || num <= 0 || num > 65535) {
         error = `Invalid port value "${value}"`;
-        hint = "Expected an integer between 1 and 65535";
+        hint =
+          configKey === "port"
+            ? "Expected an integer between 1 and 65535, or off"
+            : "Expected an integer between 1 and 65535";
       } else {
         if (configKey === "port") cfg.port = num;
         else cfg.httpsPort = num;

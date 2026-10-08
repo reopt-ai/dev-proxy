@@ -214,7 +214,7 @@ function shutdown(code = 0, reason?: string) {
     /* ignored: best-effort cleanup */
   }
   try {
-    server.close();
+    server?.close();
   } catch {
     /* ignored: best-effort cleanup */
   }

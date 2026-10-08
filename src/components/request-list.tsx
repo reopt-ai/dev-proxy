@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import { Box, Text } from "ink";
 import { useStore } from "../store.js";
 import type { SlimEvent } from "../store.js";
-import { DOMAIN, PROXY_PORT } from "../proxy/routes.js";
+import { exampleOrigin } from "../proxy/routes.js";
 import {
   formatTime,
   formatDuration,
@@ -132,7 +132,10 @@ function EmptyState() {
         {"\u25C9"} Listening for traffic{"\u2026"}
       </Text>
       <Text color={palette.muted}>
-        Open <Text color={palette.accent} bold>{`http://*.${DOMAIN}:${PROXY_PORT}`}</Text>{" "}
+        Open{" "}
+        <Text color={palette.accent} bold>
+          {exampleOrigin()}
+        </Text>{" "}
         in your browser
       </Text>
     </Box>

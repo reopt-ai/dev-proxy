@@ -344,7 +344,11 @@ and `peer run` lives only as long as the dev server it wraps. The root checks
 that a claim is still alive by probing the app's port itself.
 
 1. Ask the user for the root's dev domain (or its LAN address when there is
-   no wildcard DNS).
+   no wildcard DNS). `peer join <domain>` only works end-to-end when the
+   root has public wildcard DNS; with a publicly trusted certificate and
+   `httpsPort` 443 it goes over TLS, with mkcert it falls back to plain HTTP.
+   If the user is unsure, have them run `dev-proxy doctor` on the root and
+   read its **Peers** section.
 2. Join once. The command prints a code and waits until someone presses `A`
    and then `Y` in dev-proxy on the root machine — tell the user to approve it there and
    to check that the code matches:
@@ -358,6 +362,13 @@ that a claim is still alive by probing the app's port itself.
    `--token <token>` with the value of `~/.dev-proxy/peer-token` from the
    root (never guess the token; never print it back in full).
 
+   If `peer join` fails, its message names the cause — read it before
+   retrying: "does not resolve" is a typo or the router's DNS rebinding
+   protection (try the root's LAN IP), "certificate … not trust" means the
+   root uses mkcert (use its LAN IP), "refused" means the root is down or its
+   `httpsPort` is not 443, "did not answer" means a different network. Never
+   work around these by disabling TLS verification.
+
 3. For each app this machine will run, wrap its dev script so the claim lives
    exactly as long as the dev server:
 
@@ -365,8 +376,10 @@ that a claim is still alive by probing the app's port itself.
    "dev": "dev-proxy peer run <subdomain> --port <port> -- next dev -H 0.0.0.0 --port <port>"
    ```
 
-   The app **must bind to `0.0.0.0`** (the root reaches it over the LAN). This
-   is the one case where editing `package.json` is allowed — confirm first.
+   The app **must bind to `0.0.0.0`** (the root reaches it over the LAN):
+   Next.js does by default, Vite needs `--host`, most others take
+   `--host 0.0.0.0` or `HOST=0.0.0.0`. This is the one case where editing
+   `package.json` is allowed — confirm first.
 
 4. Do not add hosts-file entries for claimed subdomains; the root's DNS already
    resolves them and a hosts override would bypass the claim.
@@ -394,6 +407,12 @@ When the machine being set up is the root that others will join:
   back to plain HTTP on the proxy port (`http://root.<domain>:<port>`).
 - Reserve the root's LAN IP in the router's DHCP settings — the public DNS
   record and every peer depend on it.
+- `dev-proxy doctor` → **Peers** says whether `root.<domain>` resolves to this
+  machine and which path (`https://root.<domain>` or plain HTTP) peers can
+  use. Run it after changing ports or certificates.
+- With a publicly trusted certificate the root may run HTTPS only
+  (`dev-proxy config set port off`). Do not suggest this on a mkcert root —
+  peers could no longer join.
 
 ## Phase 4: DNS Setup
 

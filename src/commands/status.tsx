@@ -59,7 +59,10 @@ function Status() {
 
       <Box flexDirection="column" marginBottom={1}>
         <Row label="Domain" value={config.domain} />
-        <Row label="HTTP" value={`:${String(config.port)}`} />
+        <Row
+          label="HTTP"
+          value={config.port === null ? "off" : `:${String(config.port)}`}
+        />
         <Row label="HTTPS" value={`:${String(config.httpsPort)}`} />
       </Box>
 

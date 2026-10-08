@@ -106,6 +106,15 @@ describe("peer client config", () => {
     writePeerClientConfig({ root: "http://r:3000", token: "t" });
     expect(resolvePeerClient(3000)).toEqual({ root: "http://r:3000", token: "t" });
   });
+
+  it("resolvePeerClient uses loopback HTTPS when the HTTP listener is off", () => {
+    files.set("/mock/.dev-proxy/peer-token", "local-token\n");
+    expect(resolvePeerClient(null, 443, "example.dev")).toEqual({
+      root: "https://127.0.0.1:443",
+      token: "local-token",
+      servername: "example.dev",
+    });
+  });
 });
 
 describe("API calls", () => {
@@ -171,18 +180,87 @@ describe("API calls", () => {
       "cannot reach root proxy at http://r:3000: ECONNREFUSED",
     );
   });
+
+  it("surfaces the error code fetch buries in cause", async () => {
+    const cause = Object.assign(new Error("getaddrinfo ENOTFOUND r"), {
+      code: "ENOTFOUND",
+    });
+    fetchMock.mockRejectedValue(new TypeError("fetch failed", { cause }));
+    await expect(fetchPeers(cfg)).rejects.toMatchObject({
+      code: "ENOTFOUND",
+      message: "cannot reach root proxy at http://r:3000: getaddrinfo ENOTFOUND r",
+    });
+
+    const agg = new AggregateError([
+      Object.assign(new Error("refused"), { code: "ECONNREFUSED" }),
+    ]);
+    fetchMock.mockRejectedValue(new TypeError("fetch failed", { cause: agg }));
+    await expect(fetchPeers(cfg)).rejects.toMatchObject({ code: "ECONNREFUSED" });
+
+    const timeout = new Error("aborted");
+    timeout.name = "TimeoutError";
+    fetchMock.mockRejectedValue(timeout);
+    await expect(fetchPeers(cfg)).rejects.toMatchObject({ code: "ETIMEDOUT" });
+  });
+
+  it("verifies a loopback HTTPS root against the dev domain, not 127.0.0.1", async () => {
+    const { default: https } = await import("node:https");
+    const { default: http } = await import("node:http");
+    // The request module is what needs exercising; the server can be plain HTTP
+    // because only the request options are under test.
+    const server = http.createServer((req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({ domain: "d.test", peers: {}, auth: req.headers.authorization }),
+      );
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    const spy = vi
+      .spyOn(https, "request")
+      .mockImplementation((url, options, cb) =>
+        http.request(
+          (url as string).replace("https:", "http:"),
+          options as object,
+          cb as () => void,
+        ),
+      );
+
+    const result = await fetchPeers({
+      root: `https://127.0.0.1:${String(port)}`,
+      token: "t",
+      servername: "example.dev",
+    });
+
+    expect(result.domain).toBe("d.test");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(spy.mock.calls[0]?.[1]).toMatchObject({ servername: "example.dev" });
+    expect(spy.mock.calls[0]?.[1]).not.toHaveProperty("rejectUnauthorized");
+    server.close();
+  });
 });
 
 describe("rootCandidates", () => {
   it("tries root.<domain> over TLS first for a bare hostname", () => {
     expect(rootCandidates("example.dev", 3000)).toEqual([
       "https://root.example.dev",
+      "http://root.example.dev",
       "http://root.example.dev:3000",
       "http://example.dev:3000",
     ]);
     expect(rootCandidates("root.example.dev", 3000)).toEqual([
       "https://root.example.dev",
+      "http://root.example.dev",
       "http://root.example.dev:3000",
+    ]);
+  });
+
+  it("guesses 3000 for the root when this machine's HTTP listener is off", () => {
+    expect(rootCandidates("example.dev", null)).toEqual([
+      "https://root.example.dev",
+      "http://root.example.dev",
+      "http://root.example.dev:3000",
+      "http://example.dev:3000",
     ]);
   });
 

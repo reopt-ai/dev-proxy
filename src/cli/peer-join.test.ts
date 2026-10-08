@@ -7,6 +7,7 @@ class PeerApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -22,7 +23,8 @@ vi.mock("../proxy/pairing.js", () => ({
   PAIR_TTL_MS: 300_000,
 }));
 
-const { joinByPairing, joinWithToken } = await import("./peer-join.js");
+const { explainJoinFailure, joinByPairing, joinWithToken } =
+  await import("./peer-join.js");
 
 const CANDIDATES = ["https://root.example.dev", "http://root.example.dev:3000"];
 const PAIR = { id: "req1", code: "ABC-123", domain: "example.dev" };
@@ -104,6 +106,20 @@ describe("joinByPairing", () => {
     expect(outcome).toMatchObject({ ok: true, root: "http://root.example.dev:3000" });
   });
 
+  it("explains a DNS failure with the address the user typed", async () => {
+    requestPair.mockRejectedValue(
+      new PeerApiError("cannot reach root", undefined, "ENOTFOUND"),
+    );
+
+    const outcome = await joinByPairing(CANDIDATES, "box-b", hooks(), "exmaple.dev");
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: "root.example.dev does not resolve on this machine",
+      hint: expect.stringContaining('"exmaple.dev"') as string,
+    });
+  });
+
   it("explains that an old root cannot pair", async () => {
     requestPair
       .mockRejectedValueOnce(new PeerApiError("invalid or missing bearer token", 401))
@@ -153,6 +169,64 @@ describe("joinByPairing", () => {
 
     expect(outcome).toMatchObject({ ok: false, error: "timed out waiting for approval" });
     expect(fetchPairStatus).toHaveBeenCalledTimes(200);
+  });
+});
+
+describe("explainJoinFailure", () => {
+  const net = (root: string, code?: string) => ({
+    root,
+    code,
+    message: `cannot reach ${root}`,
+  });
+
+  it("prefers an HTTP answer over connection failures", () => {
+    expect(
+      explainJoinFailure(
+        [
+          net("https://root.d", "ECONNREFUSED"),
+          { root: "http://root.d", status: 503, message: "busy" },
+        ],
+        "d",
+      ),
+    ).toEqual({ error: "busy" });
+  });
+
+  it("names an untrusted certificate even when other candidates failed differently", () => {
+    const result = explainJoinFailure(
+      [
+        net("https://root.d", "DEPTH_ZERO_SELF_SIGNED_CERT"),
+        net("http://root.d", "ECONNREFUSED"),
+      ],
+      "d",
+    );
+    expect(result.error).toBe(
+      "root.d presented a certificate this machine does not trust",
+    );
+    expect(result.hint).toContain("mkcert");
+  });
+
+  it("recognises refused and unanswered connections", () => {
+    expect(
+      explainJoinFailure(
+        [net("https://root.d", "ECONNREFUSED"), net("http://root.d", "ECONNREFUSED")],
+        "d",
+      ),
+    ).toMatchObject({ error: "root.d refused the connection" });
+    expect(
+      explainJoinFailure(
+        [net("https://root.d", "ETIMEDOUT"), net("http://root.d", "EHOSTUNREACH")],
+        "d",
+      ),
+    ).toMatchObject({ error: "root.d did not answer" });
+  });
+
+  it("falls back to the last message for anything else", () => {
+    expect(
+      explainJoinFailure([net("https://root.d", "EPIPE"), net("http://root.d")], "d"),
+    ).toEqual({
+      error: "cannot reach http://root.d",
+    });
+    expect(explainJoinFailure([], "d")).toEqual({ error: "no root address to try" });
   });
 });
 

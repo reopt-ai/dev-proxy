@@ -1075,24 +1075,24 @@ describe("createProxyServer", () => {
     const result = createProxyServer();
     expect(result.server).toBeInstanceOf(http.Server);
     expect(result.emitter).toBeInstanceOf(EventEmitter);
-    result.server.close();
+    result.server?.close();
   });
 
   it("httpsServer is null when no certs", async () => {
     const { createProxyServer } = await import("./server.js");
     const result = createProxyServer();
     expect(result.httpsServer).toBeNull();
-    result.server.close();
+    result.server?.close();
   });
 
   it("server has request and upgrade handlers", async () => {
     const { createProxyServer } = await import("./server.js");
     const result = createProxyServer();
     // The server should have exactly one request listener (from http.createServer callback)
-    expect(result.server.listenerCount("request")).toBe(1);
+    expect(result.server?.listenerCount("request")).toBe(1);
     // The upgrade handler should be registered
-    expect(result.server.listenerCount("upgrade")).toBe(1);
-    result.server.close();
+    expect(result.server?.listenerCount("upgrade")).toBe(1);
+    result.server?.close();
   });
 });
 
@@ -1107,6 +1107,19 @@ describe("startProxyServer", () => {
     // But startProxyServer uses PROXY_PORT which is mocked to 0
     await expect(startProxyServer(server, null)).resolves.toBeUndefined();
     server.close();
+  });
+
+  it("listens on HTTPS alone when the HTTP listener is off", async () => {
+    const { startProxyServer } = await import("./server.js");
+    const httpsServer = https.createServer();
+    await expect(startProxyServer(null, httpsServer)).resolves.toBeUndefined();
+    expect(httpsServer.listening).toBe(true);
+    httpsServer.close();
+  });
+
+  it("refuses to start with nothing to listen on", async () => {
+    const { startProxyServer } = await import("./server.js");
+    await expect(startProxyServer(null, null)).rejects.toThrow(/nothing to listen on/);
   });
 
   it("rejects with formatted error on port conflict", async () => {

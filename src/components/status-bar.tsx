@@ -33,10 +33,14 @@ export function StatusBar({ termSize, httpsEnabled }: StatusBarProps) {
         <Text color={palette.success} bold>
           LIVE
         </Text>
-        <Text color={palette.subtle}>{"\u2502"}</Text>
-        <Text color={palette.accent} bold>
-          :{PROXY_PORT}
-        </Text>
+        {PROXY_PORT !== null && (
+          <>
+            <Text color={palette.subtle}>{"\u2502"}</Text>
+            <Text color={palette.accent} bold>
+              :{PROXY_PORT}
+            </Text>
+          </>
+        )}
         {httpsEnabled && (
           <>
             <Text color={palette.subtle}>{"\u2502"}</Text>

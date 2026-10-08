@@ -90,7 +90,7 @@ function resolveReplayTarget(
   hostname: string;
   port: number;
 } {
-  const defaultPort = info.protocol === "https" ? HTTPS_PORT : PROXY_PORT;
+  const defaultPort = info.protocol === "https" ? HTTPS_PORT : (PROXY_PORT ?? 80);
 
   try {
     const origin = new URL(`${info.protocol}://${info.host}`);
@@ -158,7 +158,7 @@ function StandbyView({
 
         <Box justifyContent="center" marginTop={1}>
           <Text color={palette.accent} bold>
-            LISTENING :{PROXY_PORT}
+            LISTENING{PROXY_PORT !== null && ` :${String(PROXY_PORT)}`}
           </Text>
           {httpsEnabled && (
             <>
