@@ -11,26 +11,32 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/reopt-ai/dev-proxy/badge)](https://scorecard.dev/viewer/?uri=github.com/reopt-ai/dev-proxy)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12292/badge)](https://www.bestpractices.dev/projects/12292)
 
-**Subdomain-based reverse proxy with a real-time HTTP/WS traffic inspector TUI.**
+**A development proxy built for agentic, multi-project workflows.**
 
-Built for agentic development workflows where dozens of services, worktrees, and AI-driven coding sessions run simultaneously — one proxy to route them all, one terminal to see everything.
+Develop multiple projects and Git worktrees in parallel with your coding agents — one proxy routes every project's services by subdomain, and one terminal shows their HTTP/WS traffic together.
 
 Routes `*.{domain}:3000` requests to local services by subdomain and displays all traffic in a terminal dashboard. Think of it as a lightweight, terminal-native alternative to tools like Charles or Proxyman — purpose-built for local multi-service development.
 
 [한국어 문서 (Korean)](README_KO.md)
 
+![dev-proxy for agentic development: multiple projects and parallel agent worktrees share one proxy and live HTTP/WS inspector. Wildcard DNS provides clean URLs that desktops, phones, and tablets on the same LAN can access without editing hosts files.](docs/dev-proxy-overview.png)
+
+With [wildcard DNS](#access-from-other-devices) pointing to your proxy, a trusted TLS certificate, and `httpsPort: 443`, each project gets a clean URL like `https://shop.dev.example.com` while its services keep their own internal ports. Open the same URL on a phone or tablet on the same LAN to test on real devices — no per-device `/etc/hosts` edits.
+
 ![dev-proxy screenshot](docs/screenshot.png)
 
 ## Why dev-proxy?
 
-When developing with multiple local services (frontend, API, auth, docs, admin...), you need a way to route requests by subdomain and see what's happening. Existing options are either too heavy (nginx, Caddy) or GUI-only (Charles, Proxyman).
+When coding agents work across multiple projects and branches at once, each project brings its own frontend, API, auth, and other services. dev-proxy gives them distinct subdomains and a shared traffic inspector, so you can develop and debug them together from one terminal.
 
 dev-proxy is:
 
+- **Multi-project by design** — Route services from multiple registered projects through one proxy and inspect their traffic together
 - **Zero-config start** — Works out of the box with `localhost` and auto-generated TLS certs
 - **Terminal-native** — No browser windows to manage; lives where you already work
 - **Vim-style navigation** — `j`/`k` to browse, `/` to search, `r` to replay
 - **Worktree-aware** — Routes `branch--app.domain` to per-worktree ports automatically
+- **Real-device testing** — With wildcard DNS configured, phones and tablets on the same LAN use the same URLs without per-device `/etc/hosts` edits
 - **Team-ready** — One root proxy serves the whole LAN; another machine takes over a subdomain with `peer run`, approved from the root's TUI
 - **Lightweight** — Two runtime dependencies (`ink` + `react`), ~10fps throttled rendering
 
