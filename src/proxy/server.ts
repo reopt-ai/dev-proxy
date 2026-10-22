@@ -261,19 +261,47 @@ function createRequestHandler(
     let upstreamResponse: http.IncomingMessage | null = null;
     let deadline: ReturnType<typeof setTimeout> | null = null;
     let timeoutPhase: "connection" | "response headers" | null = null;
-    let timedOut = false;
 
     const clearDeadline = () => {
       if (deadline) clearTimeout(deadline);
       deadline = null;
       timeoutPhase = null;
     };
+    const failUpstream = (err: Error, status = 502) => {
+      clearDeadline();
+      if (settled) return;
+      settled = true;
+      event.error = err.message;
+      event.duration = Math.round(performance.now() - start);
+      emitter.emit("request:error", event);
+
+      if (clientRes.destroyed) return;
+      if (!clientRes.headersSent) {
+        if (worktree) {
+          clientRes.writeHead(status, {
+            "Content-Type": "text/html; charset=utf-8",
+          });
+          clientRes.end(worktreeErrorPage(worktree, target, err.message));
+        } else {
+          clientRes.writeHead(status, { "Content-Type": "text/plain" });
+          clientRes.end(`Dev proxy: target not ready (${err.message})`);
+        }
+      } else if (!clientRes.writableEnded) {
+        clientRes.end();
+      }
+    };
+    const abortUpstream = (err: Error, status = 502) => {
+      // A request in the agent queue emits its destroy error only after a
+      // socket becomes available. Settle the client before waiting on Node.
+      failUpstream(err, status);
+      upstreamResponse?.destroy();
+      proxyReq.destroy(err);
+    };
     const armDeadline = (ms: number, phase: "connection" | "response headers") => {
       clearDeadline();
       timeoutPhase = phase;
       deadline = setTimeout(() => {
-        timedOut = true;
-        proxyReq.destroy(new Error(`upstream ${phase} timed out`));
+        abortUpstream(new Error(`upstream ${phase} timed out`), 504);
       }, ms);
       deadline.unref();
     };
@@ -330,9 +358,7 @@ function createRequestHandler(
     // occupy an agent slot while an upstream is still compiling or stalled.
     const cancelUpstream = () => {
       if (settled || clientRes.writableFinished) return;
-      clearDeadline();
-      upstreamResponse?.destroy();
-      proxyReq.destroy(new Error("client disconnected"));
+      abortUpstream(new Error("client disconnected"));
     };
     clientRes.once("close", cancelUpstream);
     clientRes.once("error", cancelUpstream);
@@ -358,30 +384,7 @@ function createRequestHandler(
         armDeadline(timeouts.responseHeadersMs, "response headers");
     });
 
-    proxyReq.on("error", (err) => {
-      clearDeadline();
-      if (settled) return;
-      settled = true;
-      event.error = err.message;
-      event.duration = Math.round(performance.now() - start);
-      emitter.emit("request:error", event);
-
-      if (clientRes.destroyed) return;
-      const status = timedOut ? 504 : 502;
-      if (!clientRes.headersSent) {
-        if (worktree) {
-          clientRes.writeHead(status, {
-            "Content-Type": "text/html; charset=utf-8",
-          });
-          clientRes.end(worktreeErrorPage(worktree, target, err.message));
-        } else {
-          clientRes.writeHead(status, { "Content-Type": "text/plain" });
-          clientRes.end(`Dev proxy: target not ready (${err.message})`);
-        }
-      } else if (!clientRes.writableEnded) {
-        clientRes.end();
-      }
-    });
+    proxyReq.on("error", failUpstream);
 
     clientReq.pipe(proxyReq);
   };

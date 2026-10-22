@@ -140,6 +140,43 @@ describe("upstream request lifecycle", () => {
     expect(await res.text()).toContain("timed out");
   });
 
+  it("returns 504 while queued behind a streaming response without waiting for a socket", async () => {
+    let arrived = 0;
+    const port = await listen(
+      http.createServer((_req, res) => {
+        arrived++;
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write("data: connected\n\n");
+      }),
+    );
+    const target = `http://127.0.0.1:${port}`;
+    const agent = requestTransport(new URL(target)).agent;
+    const maxSockets = agent.maxSockets;
+    agent.maxSockets = 1;
+    try {
+      const proxyPort = await startProxy(target, {
+        connectMs: 500,
+        responseHeadersMs: 1000,
+      });
+      const first = request(proxyPort);
+      const firstResponse = once(first, "response");
+      first.end();
+      const [stream] = (await firstResponse) as [http.IncomingMessage];
+      stream.resume();
+      expect(stream.statusCode).toBe(200);
+
+      const res = await fetch(`http://127.0.0.1:${proxyPort}/queued`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      expect(res.status).toBe(504);
+      expect(await res.text()).toContain("connection timed out");
+      expect(arrived).toBe(1);
+      expect(stream.complete).toBe(false);
+    } finally {
+      agent.maxSockets = maxSockets;
+    }
+  });
+
   it("bounds a stalled TLS handshake separately from response headers", async () => {
     const port = await listen(
       net.createServer((socket) => socket.on("data", () => undefined)),
