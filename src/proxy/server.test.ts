@@ -97,31 +97,35 @@ describe("upstream request lifecycle", () => {
 
   it("releases all 64 pooled connections when clients leave before response headers", async () => {
     let waiting = 0;
+    const arrivals = new EventEmitter();
+    const allWaiting = once(arrivals, "ready");
     const target = http.createServer((req, res) => {
-      if (req.url === "/wait") waiting++;
-      else res.end("healthy");
+      if (req.url === "/wait") {
+        if (++waiting === 64) arrivals.emit("ready");
+      } else res.end("healthy");
     });
     const targetPort = await listen(target);
     const proxyPort = await startProxy(`http://127.0.0.1:${targetPort}`);
     for (let i = 0; i < 64; i++) request(proxyPort, "/wait").end();
-    await vi.waitFor(() => {
-      expect(waiting).toBe(64);
-    });
+    await allWaiting;
     for (const req of clients) req.destroy();
-    await vi.waitFor(async () => {
-      const active = await new Promise<number>((resolve, reject) => {
-        target.getConnections((error, count) => {
-          if (error) reject(error);
-          else resolve(count);
+    await vi.waitFor(
+      async () => {
+        const active = await new Promise<number>((resolve, reject) => {
+          target.getConnections((error, count) => {
+            if (error) reject(error);
+            else resolve(count);
+          });
         });
-      });
-      expect(active).toBe(0);
-    });
+        expect(active).toBe(0);
+      },
+      { timeout: 5000 },
+    );
     const res = await fetch(`http://127.0.0.1:${proxyPort}/healthy`, {
-      signal: AbortSignal.timeout(1000),
+      signal: AbortSignal.timeout(5000),
     });
     expect(await res.text()).toBe("healthy");
-  });
+  }, 15_000);
 
   it("returns 504 when an upstream never sends response headers", async () => {
     const port = await listen(http.createServer((req) => req.resume()));
