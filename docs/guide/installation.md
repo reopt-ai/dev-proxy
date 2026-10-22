@@ -100,7 +100,7 @@ export default {
 };
 ```
 
-Only include the `"*"` entry if the user provided a default port in Step 2.
+Only include the `"*"` entry if the user provided a default port in Step 2. It matches subdomains of the configured domain only; arbitrary Host headers and direct LAN-IP requests do not reach routes. JS config files run in a fresh Worker with a 10-second evaluation limit. Export plain data for `routes` and `worktreeConfig`; module globals and process changes do not persist between loads.
 
 Two special keys:
 
@@ -218,7 +218,7 @@ ping -c 1 www.<domain>
 # Should resolve to 127.0.0.1. If not, DNS setup failed — re-check the steps above.
 ```
 
-## Step 5: HTTPS Setup (Optional)
+## Step 5: HTTPS Setup (Optional Locally, Required for Remote Peers)
 
 Check if mkcert is installed:
 
@@ -239,6 +239,8 @@ sudo apt install mkcert && mkcert -install
 dev-proxy automatically generates wildcard TLS certificates on first run when mkcert is available. No manual cert creation needed.
 
 To use a certificate you issued yourself (for example a Let's Encrypt wildcard so other devices trust it), set `certPath` and `keyPath` in `~/.dev-proxy/config.json`. Renewed files are picked up without a restart. See [Access from other devices](../../README.md#access-from-other-devices) in the README for the full setup.
+
+Remote `peer join` and subsequent control calls require HTTPS; there is no HTTP fallback. With mkcert, install only the root CA certificate (`rootCA.pem`, never its private key) on the peer and set `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem` for peer commands. The HTTPS hostname must match the certificate and resolve to the root. Use `peer join https://root.<domain>:3443` when `httpsPort` is not 443. Existing remote HTTP joins must be replaced by joining the HTTPS origin again.
 
 ## Step 6: Verify Installation
 

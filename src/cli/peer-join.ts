@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { hashToken, PAIR_TTL_MS } from "../proxy/pairing.js";
+import { requireSecureControlRoot } from "../proxy/network.js";
 import { fetchPairStatus, fetchPeers, PeerApiError, requestPair } from "./peer-client.js";
 
 /**
@@ -63,13 +64,13 @@ export function explainJoinFailure(
   if (all((c) => c === "ENOTFOUND" || c === "EAI_AGAIN")) {
     return {
       error: `${hostnameOf(last.root)} does not resolve on this machine`,
-      hint: `check the spelling of "${input}"; if the root uses public DNS, the router may drop answers that point at private IPs (DNS rebinding protection) — try \`peer join <root's LAN IP>\``,
+      hint: `check the spelling of "${input}" and whether the dev hostname resolves to the root's LAN address`,
     };
   }
   if (tls) {
     return {
       error: `${hostOf(tls.root)} presented a certificate this machine does not trust`,
-      hint: "mkcert certificates are only trusted where the CA is installed — join with the root's LAN IP (plain HTTP) or give the root a publicly trusted certificate",
+      hint: "trust the root's mkcert CA in Node.js (NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem) or use a publicly trusted certificate; remote pairing requires HTTPS",
     };
   }
   if (all((c) => c === "ECONNREFUSED")) {
@@ -110,10 +111,18 @@ export async function joinWithToken(
 ): Promise<JoinOutcome> {
   const [only] = candidates;
   // A single explicit address is trusted as given so joining works while the root is down.
-  if (candidates.length === 1 && only) return { ok: true, root: only, token };
+  if (candidates.length === 1 && only) {
+    try {
+      requireSecureControlRoot(only);
+      return { ok: true, root: only, token };
+    } catch (err) {
+      return { ok: false, error: message(err) };
+    }
+  }
   let lastError = "no root address to try";
   for (const root of candidates) {
     try {
+      requireSecureControlRoot(root);
       await fetchPeers({ root, token });
       return { ok: true, root, token };
     } catch (err) {

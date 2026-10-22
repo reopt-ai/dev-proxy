@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { CONFIG_DIR } from "../proxy/config.js";
 import { PEER_TOKEN_PATH, type PeerEntry } from "../proxy/peers.js";
 import type { PairStatus } from "../proxy/pairing.js";
+import { isLoopbackAddress, requireSecureControlRoot } from "../proxy/network.js";
 
 /**
  * Client side of the peer control API — used by `dev-proxy peer …` on machines
@@ -18,7 +19,7 @@ import type { PairStatus } from "../proxy/pairing.js";
 export const PEER_CLIENT_PATH = resolve(CONFIG_DIR, "peer.json");
 
 export interface PeerClientConfig {
-  /** Root proxy origin, e.g. `https://root.example.dev` or `http://192.168.1.10:3000`. */
+  /** Root origin: remote HTTPS or local loopback HTTP, e.g. `https://root.example.dev`. */
   root: string;
   token: string;
   /**
@@ -46,6 +47,7 @@ export function readPeerClientConfig(): PeerClientConfig | null {
 }
 
 export function writePeerClientConfig(cfg: PeerClientConfig): void {
+  requireSecureControlRoot(cfg.root);
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(PEER_CLIENT_PATH, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 }
@@ -81,14 +83,20 @@ export function resolvePeerClient(
 }
 
 /**
- * Normalise `host`, `host:port` or a full origin into a root origin. The
- * default port is the proxy's plain-HTTP port, so it never applies to https.
+ * Normalise `host`, `host:port` or a full origin into a root origin.
+ * Remote roots default to HTTPS. Only literal loopback roots use the local
+ * plain-HTTP port; normalize localhost to a literal address before trusting it.
  */
 export function normalizeRoot(input: string, defaultPort: number): string | null {
-  const withScheme = /^https?:\/\//.test(input) ? input : `http://${input}`;
   try {
-    const url = new URL(withScheme);
-    if (url.pathname !== "/" || url.search || url.hash) return null;
+    const explicitScheme = /^https?:\/\//.test(input);
+    const url = new URL(explicitScheme ? input : `https://${input}`);
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash)
+      return null;
+    if (url.hostname === "localhost") url.hostname = "127.0.0.1";
+    if (!explicitScheme && isLoopbackAddress(url.hostname.replace(/^\[|\]$/g, ""))) {
+      url.protocol = "http:";
+    }
     if (!url.port && url.protocol === "http:") url.port = String(defaultPort);
     return url.origin;
   } catch {
@@ -101,9 +109,8 @@ export function normalizeRoot(input: string, defaultPort: number): string | null
  *
  * A bare hostname is taken as the root's dev domain: with wildcard DNS
  * `root.<domain>` reaches the root over TLS without anyone knowing its IP.
- * The root's HTTP port is unknown here, so 80 and this machine's own port
- * are guessed next. Anything more specific (scheme, port or IP) is used
- * exactly as given.
+ * Never downgrade after a certificate or connection failure. Anything more
+ * specific (scheme, port or IP) is used as an explicit address.
  */
 export function rootCandidates(input: string, defaultPort: number | null): string[] {
   const guessPort = defaultPort ?? 3000;
@@ -112,15 +119,10 @@ export function rootCandidates(input: string, defaultPort: number | null): strin
   if (/^https?:\/\//.test(input)) return [exact];
   const url = new URL(`http://${input}`);
   const host = url.hostname;
-  if (url.port || net.isIP(host.replace(/^\[|\]$/g, "")) !== 0) return [exact];
+  if (host === "localhost" || url.port || net.isIP(host.replace(/^\[|\]$/g, "")) !== 0)
+    return [exact];
   const rootHost = host.startsWith("root.") ? host : `root.${host}`;
-  const candidates = [
-    `https://${rootHost}`,
-    `http://${rootHost}`,
-    `http://${rootHost}:${String(guessPort)}`,
-    exact,
-  ];
-  return [...new Set(candidates)];
+  return [`https://${rootHost}`];
 }
 
 export function defaultOwner(): string {
@@ -231,6 +233,11 @@ async function call<T = PeersResponse>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  try {
+    requireSecureControlRoot(cfg.root);
+  } catch (err) {
+    throw new PeerApiError((err as Error).message);
+  }
   const url = `${cfg.root}/_dev-proxy/${path}`;
   const headers = {
     ...(cfg.token !== undefined ? { Authorization: `Bearer ${cfg.token}` } : {}),
@@ -246,6 +253,7 @@ async function call<T = PeersResponse>(
             method,
             headers,
             body: payload,
+            redirect: "error",
             signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
           });
   } catch (err) {

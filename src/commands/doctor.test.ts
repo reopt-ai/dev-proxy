@@ -672,16 +672,16 @@ describe("describePeerReadiness", () => {
     });
   });
 
-  it("warns about a non-443 https port and names the fallback", () => {
+  it("names the explicit HTTPS origin for a non-443 port", () => {
     expect(describePeerReadiness({ ...base, httpsPort: 3443 })[1]).toMatchObject({
-      warn: true,
-      label:
-        "httpsPort is 3443 — `peer join` falls back to plain HTTP on :3000; set httpsPort 443",
+      ok: true,
+      label: "peers can join over https://root.test.dev:3443",
     });
     expect(
       describePeerReadiness({ ...base, httpsPort: 3443, httpPort: null })[1],
     ).toMatchObject({
-      label: expect.stringContaining("has nothing to fall back to") as string,
+      ok: true,
+      label: "peers can join over https://root.test.dev:3443",
     });
   });
 
@@ -690,12 +690,22 @@ describe("describePeerReadiness", () => {
       ok: false,
       warn: true,
       label:
-        "mkcert certificate is not trusted on other machines — peers join over plain HTTP on :3000",
+        "peers need to trust the mkcert CA in Node.js (NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem), then join https://root.test.dev",
     });
     expect(describePeerReadiness({ ...base, cert: "none", httpPort: null })[1]).toEqual({
       ok: false,
-      label: "no certificate and the HTTP listener is off — peers cannot join",
+      label: "no certificate — remote peers require HTTPS and cannot join",
     });
+    expect(describePeerReadiness({ ...base, cert: "none" })[1]).toEqual({
+      ok: false,
+      label: "no certificate — remote peers require HTTPS and cannot join",
+    });
+  });
+
+  it("requires hostname resolution instead of suggesting plaintext IP joins", () => {
+    const results = describePeerReadiness({ ...base, rootAddress: null });
+    expect(labels(results).join(" ")).toContain("configure DNS or hosts");
+    expect(labels(results).join(" ")).not.toContain("peer join <");
   });
 });
 

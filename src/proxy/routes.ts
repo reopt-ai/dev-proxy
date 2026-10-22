@@ -157,7 +157,7 @@ export function parseHost(host: string): {
   worktree: string | null;
 } {
   // Strip port number before parsing (HTTP Host header may include :port)
-  const hostOnly = host.replace(/:\d+$/, "").toLowerCase();
+  const hostOnly = host.replace(/:\d+$/, "").replace(/\.$/, "").toLowerCase();
   const subdomain = hostOnly.split(".")[0] ?? hostOnly;
   const delimIdx = subdomain.indexOf("--");
   if (delimIdx !== -1) {
@@ -167,13 +167,25 @@ export function parseHost(host: string): {
     };
   }
   // Bare/apex domain (host equals the configured domain) gets its own key.
-  if (hostOnly === config.domain.toLowerCase()) {
+  if (hostOnly === config.domain.replace(/\.$/, "").toLowerCase()) {
     return { app: APEX_KEY, worktree: null };
   }
   return { app: subdomain, worktree: null };
 }
 
 export function getTarget(host: string): TargetResult {
+  // A matching first label alone is not authority to reach a local service:
+  // an attacker controls the DNS for e.g. `api.attacker.example`.
+  const match = /^([a-z0-9.-]+)(?::([0-9]{1,5}))?$/i.exec(host);
+  const hostname = match?.[1]?.replace(/\.$/, "").toLowerCase();
+  const domain = config.domain.replace(/\.$/, "").toLowerCase();
+  if (
+    !hostname ||
+    (match?.[2] !== undefined && (Number(match[2]) < 1 || Number(match[2]) > 65535)) ||
+    (hostname !== domain && !hostname.endsWith(`.${domain}`))
+  ) {
+    return { url: null, worktree: null, peer: null };
+  }
   const { app, worktree } = parseHost(host);
   if (worktree) {
     const target = getWorktreeTarget(worktree, app);

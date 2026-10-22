@@ -26,7 +26,7 @@ vi.mock("../proxy/pairing.js", () => ({
 const { explainJoinFailure, joinByPairing, joinWithToken } =
   await import("./peer-join.js");
 
-const CANDIDATES = ["https://root.example.dev", "http://root.example.dev:3000"];
+const CANDIDATES = ["https://root.example.dev", "https://root.example.dev:3443"];
 const PAIR = { id: "req1", code: "ABC-123", domain: "example.dev" };
 
 /** Virtual clock: each sleep advances `now` so the deadline can be reached instantly. */
@@ -103,7 +103,7 @@ describe("joinByPairing", () => {
 
     const outcome = await joinByPairing(CANDIDATES, "box-b", hooks());
 
-    expect(outcome).toMatchObject({ ok: true, root: "http://root.example.dev:3000" });
+    expect(outcome).toMatchObject({ ok: true, root: "https://root.example.dev:3443" });
   });
 
   it("explains a DNS failure with the address the user typed", async () => {
@@ -231,10 +231,17 @@ describe("explainJoinFailure", () => {
 });
 
 describe("joinWithToken", () => {
+  it("does not save an explicit insecure remote root for an unattended join", async () => {
+    expect(await joinWithToken(["http://192.168.1.10:3000"], "secret")).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("requires HTTPS") as string,
+    });
+    expect(fetchPeers).not.toHaveBeenCalled();
+  });
   it("trusts a single explicit address without contacting it", async () => {
-    expect(await joinWithToken(["http://192.168.1.10:3000"], "tok")).toEqual({
+    expect(await joinWithToken(["https://root.example.dev:3443"], "tok")).toEqual({
       ok: true,
-      root: "http://192.168.1.10:3000",
+      root: "https://root.example.dev:3443",
       token: "tok",
     });
     expect(fetchPeers).not.toHaveBeenCalled();
@@ -247,7 +254,7 @@ describe("joinWithToken", () => {
 
     expect(await joinWithToken(CANDIDATES, "tok")).toEqual({
       ok: true,
-      root: "http://root.example.dev:3000",
+      root: "https://root.example.dev:3443",
       token: "tok",
     });
   });

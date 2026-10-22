@@ -1,14 +1,24 @@
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
-import { EventEmitter } from "node:events";
-import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { EventEmitter, once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  describe,
+  expect,
+  it,
+  vi,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ProxyEvents, ProxyRequestEvent, ProxyWsEvent } from "./types.js";
-import { __testing } from "./server.js";
+import { __testing, destroyAgents } from "./server.js";
 
 const {
   escapeHtml,
@@ -26,6 +36,166 @@ const {
 } = __testing;
 
 const WS_CLOSE_DELAY_MS = 50;
+
+describe("upstream request lifecycle", () => {
+  const servers: net.Server[] = [];
+  const sockets = new Set<net.Socket>();
+  const clients: http.ClientRequest[] = [];
+
+  async function listen(server: net.Server): Promise<number> {
+    servers.push(server);
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    return (server.address() as AddressInfo).port;
+  }
+
+  function request(port: number, path = "/", method = "GET"): http.ClientRequest {
+    const req = http.request({ hostname: "127.0.0.1", port, path, method, agent: false });
+    req.on("error", () => undefined);
+    clients.push(req);
+    return req;
+  }
+
+  async function startProxy(
+    target: string,
+    timeouts?: { connectMs: number; responseHeadersMs: number },
+  ) {
+    mockGetTarget.mockReturnValue({ url: new URL(target), worktree: null });
+    mockIsDetailActive.mockReturnValue(false);
+    return listen(
+      http.createServer(
+        createRequestHandler(
+          new EventEmitter<ProxyEvents>(),
+          "http",
+          () => false,
+          timeouts,
+        ),
+      ),
+    );
+  }
+
+  afterEach(async () => {
+    for (const req of clients.splice(0)) req.destroy();
+    destroyAgents();
+    for (const socket of sockets) socket.destroy();
+    sockets.clear();
+    await Promise.all(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.close(() => {
+              resolve();
+            });
+          }),
+      ),
+    );
+  });
+
+  it("releases all 64 pooled connections when clients leave before response headers", async () => {
+    let waiting = 0;
+    const target = http.createServer((req, res) => {
+      if (req.url === "/wait") waiting++;
+      else res.end("healthy");
+    });
+    const targetPort = await listen(target);
+    const proxyPort = await startProxy(`http://127.0.0.1:${targetPort}`);
+    for (let i = 0; i < 64; i++) request(proxyPort, "/wait").end();
+    await vi.waitFor(() => {
+      expect(waiting).toBe(64);
+    });
+    for (const req of clients) req.destroy();
+    await vi.waitFor(async () => {
+      const active = await new Promise<number>((resolve, reject) => {
+        target.getConnections((error, count) => {
+          if (error) reject(error);
+          else resolve(count);
+        });
+      });
+      expect(active).toBe(0);
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}/healthy`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(await res.text()).toBe("healthy");
+  });
+
+  it("returns 504 when an upstream never sends response headers", async () => {
+    const port = await listen(http.createServer((req) => req.resume()));
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`, {
+      connectMs: 1000,
+      responseHeadersMs: 50,
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(504);
+    expect(await res.text()).toContain("timed out");
+  });
+
+  it("bounds a stalled TLS handshake separately from response headers", async () => {
+    const port = await listen(
+      net.createServer((socket) => socket.on("data", () => undefined)),
+    );
+    const proxyPort = await startProxy(`https://127.0.0.1:${port}`, {
+      connectMs: 50,
+      responseHeadersMs: 1000,
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(504);
+    await res.text();
+  });
+
+  it("does not apply the response-header timeout to a slow request upload", async () => {
+    const port = await listen(
+      http.createServer((req, res) => {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => res.end(body));
+      }),
+    );
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`, {
+      connectMs: 1000,
+      responseHeadersMs: 30,
+    });
+    const req = request(proxyPort, "/", "POST");
+    const response = once(req, "response");
+    req.write("first");
+    await delay(80);
+    req.end("second");
+    const [res] = (await response) as [http.IncomingMessage];
+    let body = "";
+    for await (const chunk of res) body += String(chunk);
+    expect(res.statusCode).toBe(200);
+    expect(body).toBe("firstsecond");
+  });
+
+  it("keeps streaming responses alive after receiving their headers", async () => {
+    const port = await listen(
+      http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write("data: first\n\n");
+        setTimeout(() => res.end("data: second\n\n"), 80);
+      }),
+    );
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`, {
+      connectMs: 1000,
+      responseHeadersMs: 30,
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("data: first\n\ndata: second\n\n");
+  });
+});
 
 /**
  * Promise-based event capture — eliminates setTimeout race conditions.

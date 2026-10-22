@@ -130,7 +130,7 @@ Config lives in three files for new setups:
 sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v node)")"
 ```
 
-`"port": false` (`dev-proxy config set port off`) turns the plain-HTTP listener off so the proxy serves HTTPS only. It needs a certificate; `dev-proxy` refuses to start without one. Keep HTTP on when anything that does not trust your certificate — `curl`, Node scripts, Docker containers, a peer joining a mkcert root — has to reach the proxy.
+`"port": false` (`dev-proxy config set port off`) turns the plain-HTTP listener off so the proxy serves HTTPS only. It needs a certificate; `dev-proxy` refuses to start without one. Keep HTTP on if local tools need it. Remote peer control always requires HTTPS, even when the HTTP listener is enabled.
 
 Optional keys:
 
@@ -154,12 +154,16 @@ export default {
 ```
 
 - `"@"` matches the **apex** (bare) domain — e.g. `example.dev` itself, with no subdomain. Optional; falls back to `"*"` if absent.
-- `"*"` is a wildcard — unmatched subdomains route here
+- `"*"` is a wildcard — unmatched subdomains of the configured domain route here. Requests with another `Host` (including a bare LAN IP) are rejected before any route or peer lookup.
 - When multiple projects register the same subdomain, the first one wins
 - `certPath`/`keyPath` are set in the global config, resolved relative to `~/.dev-proxy/`
 - `dev-proxy.config.js` is also accepted (used when `package.json` has `"type": "module"`); `.mjs` takes precedence if both exist
 - Resolution order at runtime: `dev-proxy.config.mjs` → `dev-proxy.config.js` → `.dev-proxy.json` (legacy fallback for both `routes` and `worktreeConfig`)
 - The CLI-managed `worktrees` instance map always lives in `.dev-proxy.worktrees.json`. `worktreeConfig` (if present) belongs in the same `dev-proxy.config.mjs` default export as `routes` — see [Worktree Routing](#worktree-routing).
+
+JS configs are evaluated in a fresh Worker on every load, including their relative imports, and the Worker is then terminated. Export plain data in `routes` and `worktreeConfig`; configuration evaluation must finish within 10 seconds. Module globals and process changes do not persist between reloads.
+
+HTTP upstream requests have a 10-second queue/connection/TLS deadline and a 60-second response-header deadline after the request body is sent. Client disconnects release the upstream connection immediately. Upload time is not counted toward the header deadline, and responses such as SSE have no overall duration limit.
 
 ### Migrating from `.dev-proxy.json`
 
@@ -184,7 +188,7 @@ When mkcert is installed, dev-proxy automatically generates wildcard certificate
 
 ### Access from other devices
 
-The proxy listens on every interface, so a phone or a teammate's laptop on the same network can reach it at `http://<your-lan-ip>:3000` right away. What they cannot do out of the box is resolve `*.example.dev` to your machine, or trust your mkcert certificate. Pick one of these setups:
+The proxy listens on every interface, but only routes requests whose hostname is the configured domain or one of its subdomains. On another device, configure DNS or hosts so those names resolve to the proxy's LAN IP, and establish certificate trust for HTTPS. Pick one of these setups:
 
 |                                              | DNS                                                                          | TLS                                       | Works on phones        |
 | -------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------- | ---------------------- |
@@ -222,15 +226,16 @@ In every setup, run `dev-proxy doctor`: the **Network** section shows the addres
 
 With public DNS pointing at one machine (the **root**), a second machine can take over a subdomain without running a proxy and without anyone touching hosts files. The root routes the subdomain to the peer's app port; TLS, the inspector and every hostname stay on the root, so cookies, OAuth redirect URIs and CORS allow-lists do not change.
 
-What the root needs, from most to least convenient:
+Remote peers require HTTPS with a certificate they trust and a matching hostname. There is no plaintext fallback.
 
-| Root setup                                                        | How peers join                               |
-| ----------------------------------------------------------------- | -------------------------------------------- |
-| public wildcard DNS + Let's Encrypt certificate + `httpsPort` 443 | `peer join example.dev` — no IP, no setup    |
-| public wildcard DNS, mkcert certificate                           | `peer join example.dev` — falls back to HTTP |
-| no wildcard DNS (`localhost` or hosts-file setups)                | `peer join <root's LAN IP>`                  |
+| Root setup                                                           | How peers join                                                                   |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| public wildcard DNS + publicly trusted certificate + `httpsPort` 443 | `peer join example.dev`                                                          |
+| trusted certificate on another HTTPS port                            | `peer join https://root.example.dev:3443`                                        |
+| mkcert certificate                                                   | trust the root's CA in Node.js, then use the HTTPS hostname                      |
+| no wildcard DNS                                                      | add `root.example.dev` to the peer's DNS or hosts file, matching the certificate |
 
-The root must keep its plain-HTTP listener on unless its certificate is publicly trusted. `dev-proxy doctor` → **Peers** on the root tells you which row you are in.
+For mkcert, copy only the root's `rootCA.pem` to the peer (never `rootCA-key.pem`) and set `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem` when running peer commands. Keep this setting for `peer run`, `claim`, `release` and `list`, not just `join`. The root can turn its HTTP listener off. `dev-proxy doctor` → **Peers** reports the required HTTPS origin and trust setup.
 
 On the peer:
 
@@ -241,11 +246,11 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # claim studio while 
 
 `peer join <domain>` reaches the root at `https://root.<domain>` (the wildcard record already resolves it, so nobody needs the root's IP) and asks to pair. The root's TUI shows the machine's name, address and the same code; press `A` then `Y` there to approve, or `D` to deny. No secret is copied by hand: the peer generates its own token and the root stores only its hash. On the root, `dev-proxy peer devices` lists paired machines and `dev-proxy peer revoke <name>` unpairs one and releases the subdomains it had claimed.
 
-`https://root.<domain>` needs the root's `httpsPort` to be 443 and a certificate the peer trusts — a mkcert certificate is not, so `peer join` then falls back to plain HTTP on `root.<domain>` (port 80, then the proxy port). Without wildcard DNS, pass an address instead (`peer join 192.168.1.10`). `--token <token>` skips the approval using the root's own token from `~/.dev-proxy/peer-token`, which is useful for unattended setups. `dev-proxy doctor` on the root has a **Peers** section that says which of these paths peers can use; on a joined machine it checks that the root still accepts its token.
+`peer join <domain>` uses HTTPS port 443; for another port, pass the full origin (`peer join https://root.example.dev:3443`). `--token <token>` skips approval using the root's own token from `~/.dev-proxy/peer-token`, and still requires HTTPS remotely. Existing joins stored as remote `http://…` in `~/.dev-proxy/peer.json` must be replaced by joining the HTTPS origin again. Commands on the root itself can continue to use literal loopback HTTP. `dev-proxy doctor` on a joined machine checks that the root still accepts its token.
 
 `peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost` — Next.js does by default, Vite needs `vite --host`, and most other dev servers take `--host 0.0.0.0` or `HOST=0.0.0.0`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
 
-Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy ports) only answers callers from loopback or private networks, refuses requests sent by a browser, and requires a bearer token for everything except the pair request itself.
+Rules: a claim beats the root's local route for the same subdomain; the last claim wins (the previous owner is reported); the root probes claim targets every 30s and drops a claim that has been unreachable for 10 minutes. The control API (`/_dev-proxy/…` on the proxy ports) only answers callers from loopback or private networks, requires TLS for non-loopback callers, refuses requests sent by a browser, and requires a bearer token for everything except the pair request itself. Repeated pairing requests from one address are limited to one every 5 seconds.
 
 ### Worktree Routing
 
@@ -408,13 +413,13 @@ lsof -ti :3000 | xargs kill
 
 The error names the failure; the usual causes, in order:
 
-| Message                                   | Cause                                                                                | Fix                                                                                                           |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `… does not resolve on this machine`      | typo in the domain, or the router drops public DNS answers that point at private IPs | check the spelling; allow the domain in the router's DNS rebinding protection, or `peer join <root's LAN IP>` |
-| `… presented a certificate … not trust`   | the root uses a mkcert certificate                                                   | join with the root's LAN IP (plain HTTP), or give the root a publicly trusted certificate                     |
-| `… refused the connection`                | dev-proxy is not running on the root, or its `httpsPort` is not 443                  | start it; `dev-proxy config set httpsPort 443` on the root, or pass `host:port`                               |
-| `… did not answer`                        | different network, VPN, guest Wi-Fi or a firewall in between                         | put both machines on the same LAN                                                                             |
-| `the root proxy does not support pairing` | the root runs a dev-proxy older than 1.11                                            | upgrade it, or pass `--token`                                                                                 |
+| Message                                   | Cause                                                                                | Fix                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `… does not resolve on this machine`      | typo in the domain, or the router drops public DNS answers that point at private IPs | check spelling; fix DNS or add the certificate's hostname to the peer's hosts file                      |
+| `… presented a certificate … not trust`   | the root uses a mkcert certificate                                                   | set `NODE_EXTRA_CA_CERTS` to the root's `rootCA.pem`, or use a publicly trusted certificate             |
+| `… refused the connection`                | dev-proxy is not running on the root, or its `httpsPort` is not 443                  | start it; `dev-proxy config set httpsPort 443` on the root, or pass `https://root.<domain>:<httpsPort>` |
+| `… did not answer`                        | different network, VPN, guest Wi-Fi or a firewall in between                         | put both machines on the same LAN                                                                       |
+| `the root proxy does not support pairing` | the root runs a dev-proxy older than 1.11                                            | upgrade it, or pass `--token`                                                                           |
 
 On the root, `dev-proxy doctor` → **Peers** reports the same from the other side.
 

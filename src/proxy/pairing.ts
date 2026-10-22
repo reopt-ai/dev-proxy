@@ -21,6 +21,7 @@ export const PEER_DEVICES_PATH = resolve(CONFIG_DIR, "peer-devices.json");
 export const PAIR_TTL_MS = 5 * 60_000;
 /** The pair endpoint is unauthenticated, so keep the queue small. */
 const MAX_PENDING = 8;
+const PAIR_RETRY_MS = 5000;
 const MAX_NAME_LENGTH = 40;
 const TOKEN_HASH_RE = /^[0-9a-f]{64}$/;
 
@@ -52,6 +53,7 @@ let requests = new Map<string, TrackedRequest>();
 let devices = new Map<string, PeerDevice>();
 const listeners = new Set<() => void>();
 let pendingSnapshot: readonly PairRequest[] = [];
+let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
 function notify(): void {
   pendingSnapshot = [...requests.values()].filter((r) => !r.denied);
@@ -89,7 +91,26 @@ function prune(now: number): boolean {
       changed = true;
     }
   }
+  if (changed) scheduleExpiry(now);
   return changed;
+}
+
+/** One timer owns the bounded queue, including requests replaced by the same IP. */
+function scheduleExpiry(now: number): void {
+  if (expiryTimer) clearTimeout(expiryTimer);
+  expiryTimer = null;
+  if (requests.size === 0) return;
+  const earliest = Math.min(...[...requests.values()].map((r) => r.requestedAt));
+  expiryTimer = setTimeout(
+    () => {
+      expiryTimer = null;
+      const currentTime = Date.now();
+      if (prune(currentTime)) notify();
+      else scheduleExpiry(currentTime);
+    },
+    Math.max(1, earliest + PAIR_TTL_MS - now),
+  );
+  expiryTimer.unref();
 }
 
 // ── Persistence ──────────────────────────────────────────────
@@ -163,10 +184,18 @@ export function requestPairing(
     return { ok: false, status: 400, error: "tokenHash must be a sha256 hex digest" };
   }
 
-  prune(now);
+  if (prune(now)) notify();
   // A machine asking again replaces its earlier request instead of piling up.
   for (const [id, req] of requests) {
-    if (req.address === address) requests.delete(id);
+    if (req.address !== address) continue;
+    if (now - req.requestedAt < PAIR_RETRY_MS) {
+      return {
+        ok: false,
+        status: 429,
+        error: "wait 5 seconds before requesting pairing again",
+      };
+    }
+    requests.delete(id);
   }
   if (requests.size >= MAX_PENDING) {
     notify();
@@ -182,10 +211,7 @@ export function requestPairing(
     denied: false,
   };
   requests.set(request.id, request);
-  // Expire it even if nobody polls or asks again.
-  setTimeout(() => {
-    if (prune(Date.now())) notify();
-  }, PAIR_TTL_MS + 1000).unref();
+  scheduleExpiry(now);
   notify();
   return { ok: true, request };
 }
@@ -216,6 +242,7 @@ export function approvePairing(id: string, now = Date.now()): PeerDevice | null 
   };
   devices.set(id, device);
   writeDevicesFile();
+  scheduleExpiry(now);
   notify();
   return device;
 }
@@ -262,6 +289,8 @@ export function usePairRequests(): readonly PairRequest[] {
 export const __testing = {
   readDevicesFile,
   reset(): void {
+    if (expiryTimer) clearTimeout(expiryTimer);
+    expiryTimer = null;
     requests = new Map();
     devices = new Map();
     pendingSnapshot = [];

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const files = new Map<string, string>();
 vi.mock("node:fs", () => ({
@@ -56,6 +56,11 @@ beforeEach(() => {
   __testing.reset();
 });
 
+afterEach(() => {
+  __testing.reset();
+  vi.useRealTimers();
+});
+
 describe("helpers", () => {
   it("derives a stable short code from the token hash", () => {
     expect(pairCode("a3f9c2" + "0".repeat(58))).toBe("A3F-9C2");
@@ -82,11 +87,38 @@ describe("requestPairing", () => {
     expect(__testing.requests.size).toBe(0);
   });
 
-  it("replaces an earlier request from the same address", () => {
+  it("replaces an earlier request from the same address after the retry cooldown", () => {
     const first = request("box-b", "192.168.1.20", HASH);
-    const second = request("box-b", "192.168.1.20", hashToken("other"));
+    const second = request("box-b", "192.168.1.20", hashToken("other"), 6000);
     expect([...__testing.requests.keys()]).toEqual([second.id]);
     expect(pairingStatus(first.id, TOKEN, 1000)).toBe("unknown");
+  });
+
+  it("rate-limits repeated requests without replacing the approval prompt", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const first = request();
+    for (let i = 0; i < 1000; i++) {
+      expect(requestPairing("box-b", "192.168.1.20", HASH, 1001)).toMatchObject({
+        ok: false,
+        status: 429,
+      });
+    }
+    expect([...__testing.requests.keys()]).toEqual([first.id]);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("keeps one expiry timer across replacements and clears it on approval", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    let pending = request();
+    for (let i = 1; i <= 50; i++) {
+      vi.advanceTimersByTime(5000);
+      pending = request("box-b", "192.168.1.20", HASH, Date.now());
+      expect(vi.getTimerCount()).toBe(1);
+    }
+    approvePairing(pending.id);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("caps the number of pending requests", () => {

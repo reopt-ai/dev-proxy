@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
+import { Worker } from "node:worker_threads";
 
 // ── Paths ────────────────────────────────────────────────────
 export const CONFIG_DIR = resolve(homedir(), ".dev-proxy");
@@ -114,14 +115,62 @@ export function resolveProjectConfigFile(projectDir: string): ConfigResolution |
   return null;
 }
 
-async function loadJsConfig(filePath: string): Promise<RawJsConfig | null> {
+// A worker owns the entire imported module graph. Terminating it reclaims the
+// ESM cache; cache-busting URLs in the proxy process can never be evicted.
+const CONFIG_WORKER = new URL(
+  `data:text/javascript,${encodeURIComponent(`
+  import { parentPort, workerData } from "node:worker_threads";
   try {
-    const url = pathToFileURL(filePath).href + "?t=" + String(Date.now());
-    const mod = (await import(url)) as { default?: RawJsConfig };
-    return (mod.default ?? mod) as RawJsConfig;
+    const mod = await import(workerData);
+    const config = mod.default ?? mod;
+    parentPort.postMessage({ ok: true, config: {
+      routes: config.routes,
+      worktreeConfig: config.worktreeConfig,
+    } });
+  } catch (error) {
+    parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
+`)}`,
+);
+
+type ConfigWorkerResult =
+  { ok: true; config: RawJsConfig } | { ok: false; error: string };
+
+async function loadJsConfig(
+  filePath: string,
+  timeoutMs = 10_000,
+): Promise<RawJsConfig | null> {
+  let worker: Worker | undefined;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    worker = new Worker(CONFIG_WORKER, {
+      workerData: pathToFileURL(filePath).href,
+      // Configs are plain JS; do not copy the CLI's TS loader or test-runner flags.
+      execArgv: [],
+    });
+    const activeWorker = worker;
+    return await new Promise<RawJsConfig>((resolve, reject) => {
+      deadline = setTimeout(() => {
+        reject(new Error("config evaluation timed out"));
+      }, timeoutMs);
+      activeWorker.once("message", (result: ConfigWorkerResult) => {
+        if (result.ok) resolve(result.config);
+        else reject(new Error(result.error));
+      });
+      activeWorker.once("error", reject);
+      activeWorker.once("exit", (code) => {
+        reject(
+          new Error(`config worker exited before returning a config (code ${code})`),
+        );
+      });
+    });
   } catch (err) {
     console.error(`[dev-proxy] Failed to load ${filePath}: ${(err as Error).message}`);
     return null;
+  } finally {
+    if (deadline) clearTimeout(deadline);
+    // Await termination even when a config creates timers or fails to load.
+    await worker?.terminate();
   }
 }
 

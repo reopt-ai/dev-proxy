@@ -1,4 +1,5 @@
 import http from "node:http";
+import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -115,6 +116,58 @@ describe("isControlPath", () => {
 });
 
 describe("control API", () => {
+  it.each(["/_dev-proxy/peers", "/_dev-proxy/pair"])(
+    "requires TLS for LAN callers to %s even if a forwarding header claims HTTPS",
+    (url) => {
+      const req = {
+        url,
+        method: "GET",
+        headers: { authorization: `Bearer ${TOKEN}`, "x-forwarded-proto": "https" },
+        socket: { remoteAddress: "192.168.1.20" },
+      } as unknown as http.IncomingMessage;
+      const res = { writeHead: vi.fn(), end: vi.fn() };
+      expect(
+        createControlHandler(TOKEN)(req, res as unknown as http.ServerResponse),
+      ).toBe(true);
+      expect(res.writeHead).toHaveBeenCalledWith(426, expect.any(Object));
+    },
+  );
+
+  it("accepts LAN control requests over an encrypted socket", () => {
+    const req = {
+      url: "/_dev-proxy/peers",
+      method: "GET",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      socket: { remoteAddress: "192.168.1.20", encrypted: true },
+    } as unknown as http.IncomingMessage;
+    const res = { writeHead: vi.fn(), end: vi.fn() };
+    createControlHandler(TOKEN)(req, res as unknown as http.ServerResponse);
+    expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+  });
+  it("rechecks a peer credential after a delayed request body arrives", async () => {
+    deviceTokens.set("peer-token", "device-1");
+    claimPeer.mockReturnValue({ ok: true, replaced: null });
+    const body = JSON.stringify({ target: "http://192.168.1.20:3001", owner: "b" });
+    const req = http.request(`${base}/_dev-proxy/peers/studio`, {
+      method: "PUT",
+      headers: {
+        Authorization: "Bearer peer-token",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    });
+    const admitted = once(server, "request");
+    req.flushHeaders();
+    await admitted;
+    deviceTokens.delete("peer-token");
+    const response = once(req, "response");
+    req.end(body);
+    const [res] = (await response) as [http.IncomingMessage];
+    res.resume();
+    await once(res, "end");
+    expect(res.statusCode).toBe(401);
+    expect(claimPeer).not.toHaveBeenCalled();
+  });
+
   it("leaves non-control requests to the proxy", async () => {
     const res = await fetch(`${base}/anything`);
     expect(await res.text()).toBe("proxied");
