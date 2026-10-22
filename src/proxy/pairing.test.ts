@@ -129,6 +129,30 @@ describe("requestPairing", () => {
     });
   });
 
+  it("reschedules expiration when the wall clock moves backwards", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const pending = request();
+    vi.setSystemTime(0);
+    vi.advanceTimersByTime(PAIR_TTL_MS);
+    expect(__testing.requests.has(pending.id)).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(1000);
+    expect(__testing.requests.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("prunes expired prompts on a new request before the timer has run", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const expired = request();
+    vi.setSystemTime(1000 + PAIR_TTL_MS);
+    const pending = request("new-peer", "192.168.1.21", HASH, Date.now());
+    expect(__testing.requests.has(expired.id)).toBe(false);
+    expect([...__testing.requests.keys()]).toEqual([pending.id]);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
   it("drops requests nobody answered within the TTL", () => {
     const req = request();
     expect(pairingStatus(req.id, TOKEN, 1000 + PAIR_TTL_MS - 1)).toBe("pending");

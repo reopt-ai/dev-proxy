@@ -337,17 +337,7 @@ function createRequestHandler(
           event.responseSize = responseSize;
           emitter.emit("request:complete", event);
         });
-        proxyRes.on("error", (err) => {
-          if (settled) return;
-          settled = true;
-          event.error = err.message;
-          event.duration = Math.round(performance.now() - start);
-          emitter.emit("request:error", event);
-          if (!clientRes.destroyed) {
-            if (!clientRes.headersSent) clientRes.writeHead(502);
-            if (!clientRes.writableEnded) clientRes.end();
-          }
-        });
+        proxyRes.on("error", failUpstream);
 
         clientRes.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
         proxyRes.pipe(clientRes);

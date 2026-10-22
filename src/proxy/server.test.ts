@@ -3,6 +3,7 @@ import https from "node:https";
 import net from "node:net";
 import { EventEmitter, once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { PassThrough } from "node:stream";
 import {
   describe,
   expect,
@@ -36,6 +37,84 @@ const {
 } = __testing;
 
 const WS_CLOSE_DELAY_MS = 50;
+
+describe("upstream terminal event ordering", () => {
+  function setup() {
+    const socket = new net.Socket();
+    const req = new http.IncomingMessage(socket);
+    req.headers.host = "web.test.dev";
+    req.method = "GET";
+    req.url = "/";
+    const res = new http.ServerResponse(req);
+    const upstream = new PassThrough();
+    const response = new http.IncomingMessage(new net.Socket());
+    response.statusCode = 200;
+    let respond: (message: http.IncomingMessage) => void = () => undefined;
+    vi.spyOn(http, "request").mockImplementation((...args: unknown[]) => {
+      respond = args.at(-1) as typeof respond;
+      return upstream as unknown as http.ClientRequest;
+    });
+    mockGetTarget.mockReturnValue({
+      url: new URL("http://localhost:4000"),
+      worktree: null,
+    });
+    mockIsDetailActive.mockReturnValue(false);
+    const emitter = new EventEmitter<ProxyEvents>();
+    const errors: ProxyRequestEvent[] = [];
+    emitter.on("request:error", (event) => errors.push(event));
+    createRequestHandler(emitter, "http", () => false)(req, res);
+    return { req, res, upstream, response, errors, respond };
+  }
+
+  it("discards headers arriving after cancellation and settles only once", () => {
+    const f = setup();
+    f.res.destroy();
+    f.res.emit("close");
+    f.respond(f.response);
+    // A queued socket and finish notification may arrive after cancellation.
+    f.upstream.emit("socket", new net.Socket());
+    f.upstream.emit("finish");
+    expect(f.response.destroyed).toBe(true);
+    expect(f.upstream.destroyed).toBe(true);
+    expect(f.errors).toHaveLength(1);
+    expect(f.errors[0]?.error).toBe("client disconnected");
+    f.req.destroy();
+  });
+
+  it.each(["request", "response"])(
+    "ends an interrupted response on an upstream %s error without rewriting headers",
+    (source) => {
+      const f = setup();
+      f.respond(f.response);
+      f.upstream.emit("finish");
+      const writeHead = vi.spyOn(f.res, "writeHead");
+      const error = new Error("upstream stream interrupted");
+      (source === "request" ? f.upstream : f.response).emit("error", error);
+      expect(f.res.writableEnded).toBe(true);
+      expect(writeHead).not.toHaveBeenCalled();
+      expect(f.errors).toHaveLength(1);
+      expect(f.errors[0]?.error).toBe(error.message);
+      f.upstream.emit("error", error);
+      expect(f.errors).toHaveLength(1);
+      f.response.destroy();
+      f.upstream.destroy();
+      f.req.destroy();
+    },
+  );
+
+  it("does not end an already-ended client response again on a late upstream error", () => {
+    const f = setup();
+    f.respond(f.response);
+    f.res.end();
+    const end = vi.spyOn(f.res, "end");
+    f.upstream.emit("error", new Error("late upstream failure"));
+    expect(end).not.toHaveBeenCalled();
+    expect(f.errors).toHaveLength(1);
+    f.response.destroy();
+    f.upstream.destroy();
+    f.req.destroy();
+  });
+});
 
 describe("upstream request lifecycle", () => {
   const servers: net.Server[] = [];
