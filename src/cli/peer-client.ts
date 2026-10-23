@@ -6,7 +6,11 @@ import { resolve } from "node:path";
 import { CONFIG_DIR } from "../proxy/config.js";
 import { PEER_TOKEN_PATH, type PeerEntry } from "../proxy/peers.js";
 import type { PairStatus } from "../proxy/pairing.js";
-import { isLoopbackAddress, requireSecureControlRoot } from "../proxy/network.js";
+import {
+  hostAddress,
+  isLoopbackAddress,
+  requireSecureControlRoot,
+} from "../proxy/network.js";
 
 /**
  * Client side of the peer control API — used by `dev-proxy peer …` on machines
@@ -37,7 +41,8 @@ export function readPeerClientConfig(): PeerClientConfig | null {
         readFileSync(PEER_CLIENT_PATH, "utf-8"),
       ) as Partial<PeerClientConfig>;
       if (typeof data.root === "string" && typeof data.token === "string") {
-        return { root: data.root, token: data.token };
+        // `peer join localhost` used to save http://localhost:<port>.
+        return { root: pinLoopbackRoot(data.root), token: data.token };
       }
     }
   } catch {
@@ -83,9 +88,21 @@ export function resolvePeerClient(
 }
 
 /**
+ * Plain HTTP is trusted only on a literal loopback address, never on a name.
+ * Over TLS the certificate is checked against the name, so that stays as written.
+ */
+function pinLoopbackRoot(root: string): string {
+  if (!URL.canParse(root)) return root;
+  const url = new URL(root);
+  if (url.protocol !== "http:" || url.hostname !== "localhost") return root;
+  url.hostname = "127.0.0.1";
+  return url.origin;
+}
+
+/**
  * Normalise `host`, `host:port` or a full origin into a root origin.
- * Remote roots default to HTTPS. Only literal loopback roots use the local
- * plain-HTTP port; normalize localhost to a literal address before trusting it.
+ * Remote roots default to HTTPS. Only loopback roots use the local
+ * plain-HTTP port.
  */
 export function normalizeRoot(input: string, defaultPort: number): string | null {
   try {
@@ -93,15 +110,22 @@ export function normalizeRoot(input: string, defaultPort: number): string | null
     const url = new URL(explicitScheme ? input : `https://${input}`);
     if (url.username || url.password || url.pathname !== "/" || url.search || url.hash)
       return null;
-    if (url.hostname === "localhost") url.hostname = "127.0.0.1";
-    if (!explicitScheme && isLoopbackAddress(url.hostname.replace(/^\[|\]$/g, ""))) {
-      url.protocol = "http:";
-    }
+    const loopback =
+      url.hostname === "localhost" || isLoopbackAddress(hostAddress(url.hostname));
+    if (!explicitScheme && loopback) url.protocol = "http:";
     if (!url.port && url.protocol === "http:") url.port = String(defaultPort);
-    return url.origin;
+    return pinLoopbackRoot(url.origin);
   } catch {
     return null;
   }
+}
+
+/** A scheme, a port or an IP address names one root exactly; a bare hostname is a guess. */
+export function isExplicitRoot(input: string): boolean {
+  if (/^https?:\/\//.test(input) || /:\d+$/.test(input)) return true;
+  if (!URL.canParse(`http://${input}`)) return false;
+  const host = new URL(`http://${input}`).hostname;
+  return host === "localhost" || net.isIP(hostAddress(host)) !== 0;
 }
 
 /**
@@ -109,20 +133,22 @@ export function normalizeRoot(input: string, defaultPort: number): string | null
  *
  * A bare hostname is taken as the root's dev domain: with wildcard DNS
  * `root.<domain>` reaches the root over TLS without anyone knowing its IP.
- * Never downgrade after a certificate or connection failure. Anything more
- * specific (scheme, port or IP) is used as an explicit address.
+ * The root's `httpsPort` is unknown here, so 443 is tried first and then this
+ * machine's own (the default unless configured). Never downgrade to plain
+ * HTTP. An explicit address is used as given.
  */
-export function rootCandidates(input: string, defaultPort: number | null): string[] {
-  const guessPort = defaultPort ?? 3000;
-  const exact = normalizeRoot(input, guessPort);
+export function rootCandidates(
+  input: string,
+  defaultPort: number | null,
+  httpsPort = 3443,
+): string[] {
+  const exact = normalizeRoot(input, defaultPort ?? 3000);
   if (!exact) return [];
-  if (/^https?:\/\//.test(input)) return [exact];
-  const url = new URL(`http://${input}`);
-  const host = url.hostname;
-  if (host === "localhost" || url.port || net.isIP(host.replace(/^\[|\]$/g, "")) !== 0)
-    return [exact];
+  if (isExplicitRoot(input)) return [exact];
+  const host = new URL(exact).hostname;
   const rootHost = host.startsWith("root.") ? host : `root.${host}`;
-  return [`https://${rootHost}`];
+  const origin = `https://${rootHost}`;
+  return httpsPort === 443 ? [origin] : [origin, `${origin}:${String(httpsPort)}`];
 }
 
 export function defaultOwner(): string {

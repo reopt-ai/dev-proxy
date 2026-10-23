@@ -640,7 +640,6 @@ describe("describeCert", () => {
 describe("describePeerReadiness", () => {
   const base = {
     domain: "test.dev",
-    httpPort: 3000 as number | null,
     httpsPort: 443,
     cert: "public" as const,
     rootAddress: "192.168.1.5" as string | null,
@@ -677,12 +676,6 @@ describe("describePeerReadiness", () => {
       ok: true,
       label: "peers can join over https://root.test.dev:3443",
     });
-    expect(
-      describePeerReadiness({ ...base, httpsPort: 3443, httpPort: null })[1],
-    ).toMatchObject({
-      ok: true,
-      label: "peers can join over https://root.test.dev:3443",
-    });
   });
 
   it("explains mkcert and missing certificates", () => {
@@ -691,10 +684,6 @@ describe("describePeerReadiness", () => {
       warn: true,
       label:
         "peers need to trust the mkcert CA in Node.js (NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem), then join https://root.test.dev",
-    });
-    expect(describePeerReadiness({ ...base, cert: "none", httpPort: null })[1]).toEqual({
-      ok: false,
-      label: "no certificate — remote peers require HTTPS and cannot join",
     });
     expect(describePeerReadiness({ ...base, cert: "none" })[1]).toEqual({
       ok: false,

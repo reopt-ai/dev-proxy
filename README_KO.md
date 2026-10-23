@@ -223,12 +223,12 @@ mkcert가 설치되어 있으면 첫 실행 시 와일드카드 인증서를 자
 
 원격 피어는 호스트명이 일치하고 신뢰할 수 있는 인증서를 사용하는 HTTPS가 필요합니다. 평문 HTTP 폴백은 없습니다.
 
-| 루트 구성                                           | 피어가 join하는 방법                                               |
-| --------------------------------------------------- | ------------------------------------------------------------------ |
-| 공용 와일드카드 DNS + 공인 인증서 + `httpsPort` 443 | `peer join example.dev`                                            |
-| 다른 HTTPS 포트의 신뢰된 인증서                     | `peer join https://root.example.dev:3443`                          |
-| mkcert 인증서                                       | Node.js에서 루트 CA를 신뢰하도록 설정한 뒤 HTTPS 호스트명으로 join |
-| 와일드카드 DNS 없음                                 | 인증서에 맞는 `root.example.dev`를 피어의 DNS나 hosts에 등록       |
+| 루트 구성                                                     | 피어가 join하는 방법                                               |
+| ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 공용 와일드카드 DNS + 공인 인증서 + `httpsPort` 443 또는 3443 | `peer join example.dev`                                            |
+| 다른 HTTPS 포트의 신뢰된 인증서                               | `peer join https://root.example.dev:8443`                          |
+| mkcert 인증서                                                 | Node.js에서 루트 CA를 신뢰하도록 설정한 뒤 HTTPS 호스트명으로 join |
+| 와일드카드 DNS 없음                                           | 인증서에 맞는 `root.example.dev`를 피어의 DNS나 hosts에 등록       |
 
 mkcert는 루트의 `rootCA.pem`만 피어에 복사하고(`rootCA-key.pem`은 공유 금지), 피어 명령 실행 시 `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem`을 설정하세요. `join` 이후 `peer run`, `claim`, `release`, `list`에서도 같은 설정이 필요합니다. 루트의 HTTP 리스너는 꺼도 됩니다. `dev-proxy doctor` → **Peers**에서 HTTPS 주소와 신뢰 설정을 확인할 수 있습니다.
 
@@ -241,7 +241,7 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # pnpm dev가 도는 
 
 `peer join <도메인>`은 `https://root.<도메인>`으로 루트에 접속해(와일드카드 레코드가 이미 해석해 주므로 루트의 IP를 알 필요가 없습니다) 페어링을 요청합니다. 루트의 TUI에 머신 이름, 주소, 같은 코드가 표시되며, 거기서 `A`를 누른 뒤 `Y`로 확인하면 승인, `D`를 누르면 거절입니다. 손으로 복사할 비밀 값은 없습니다. 피어가 토큰을 직접 만들고 루트는 그 해시만 저장합니다. 루트에서 `dev-proxy peer devices`로 페어링된 머신을 보고 `dev-proxy peer revoke <이름>`으로 해제하며, 그 머신이 claim한 서브도메인도 함께 풀립니다.
 
-`peer join <도메인>`은 HTTPS 443 포트를 사용합니다. 다른 포트는 전체 주소를 지정하세요(`peer join https://root.example.dev:3443`). `--token <토큰>`은 루트의 `~/.dev-proxy/peer-token` 값으로 승인을 건너뛰지만, 원격 연결에는 여전히 HTTPS가 필요합니다. 기존 `~/.dev-proxy/peer.json`에 원격 `http://…` 주소가 저장되어 있다면 HTTPS 주소로 다시 join하세요. 루트 머신 자체의 명령은 루프백 IP의 HTTP를 계속 사용할 수 있습니다. join한 머신의 `dev-proxy doctor`는 루트가 아직 토큰을 받아주는지 확인합니다.
+`peer join <도메인>`은 `https://root.<도메인>`을 443 포트로 먼저 시도하고, 이어서 이 머신의 `httpsPort`(설정하지 않았다면 3443)로 시도합니다. 그 밖의 포트나 호스트명은 전체 주소를 지정하세요(`peer join https://root.example.dev:8443`). `--token <토큰>`은 루트의 `~/.dev-proxy/peer-token` 값으로 승인을 건너뛰지만, 원격 연결에는 여전히 HTTPS가 필요합니다. 추측한 `root.<도메인>`은 토큰을 받아줄 때만 저장하고, 직접 지정한 주소는 루트가 꺼져 있어도 join할 수 있도록 그대로 저장합니다. 기존 `~/.dev-proxy/peer.json`에 원격 `http://…` 주소가 저장되어 있다면 HTTPS 주소로 다시 join하세요. 저장된 `http://localhost:<포트>`는 `http://127.0.0.1:<포트>`로 계속 동작합니다. 루트 머신 자체의 명령은 루프백 IP의 HTTP를 계속 사용할 수 있습니다. join한 머신의 `dev-proxy doctor`는 루트가 아직 토큰을 받아주는지 확인합니다.
 
 `peer run`은 명령이 시작될 때 `studio.<도메인>` → `http://<이 머신의 LAN IP>:3001`을 claim하고, 명령이 끝나면(Ctrl+C 포함) 해제합니다. 앱의 `dev` 스크립트에 넣어 두면 개발자는 평소처럼 `pnpm dev`만 치면 됩니다. 앱은 `localhost`가 아니라 `0.0.0.0`에 바인드해야 합니다. Next.js는 기본값이 그렇고, Vite는 `vite --host`가 필요하며, 대부분의 다른 개발 서버는 `--host 0.0.0.0`이나 `HOST=0.0.0.0`을 받습니다. `peer claim` / `peer release`는 명령을 감싸지 않고 같은 일을 하고, `peer list`는 모든 claim을 소유자·도달 가능 여부와 함께 보여줍니다.
 
@@ -408,13 +408,15 @@ lsof -ti :3000 | xargs kill
 
 에러 메시지가 실패 원인을 말해 줍니다. 흔한 순서대로:
 
-| 메시지                                    | 원인                                                               | 해결                                                                                               |
-| ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `… does not resolve on this machine`      | 도메인 오타, 또는 공유기가 사설 IP를 가리키는 공용 DNS 응답을 버림 | 철자와 DNS 확인, 또는 인증서의 호스트명을 피어의 hosts 파일에 등록                                 |
-| `… presented a certificate … not trust`   | 루트가 mkcert 인증서를 사용                                        | `NODE_EXTRA_CA_CERTS`를 루트의 `rootCA.pem`으로 설정하거나 공인 인증서 사용                        |
-| `… refused the connection`                | 루트에서 dev-proxy가 꺼져 있거나 `httpsPort`가 443이 아님          | 실행; 루트에서 `dev-proxy config set httpsPort 443`, 또는 `https://root.<도메인>:<httpsPort>` 지정 |
-| `… did not answer`                        | 다른 네트워크, VPN, 게스트 Wi-Fi, 방화벽                           | 두 머신을 같은 LAN에 두기                                                                          |
-| `the root proxy does not support pairing` | 루트의 dev-proxy가 1.11 이전 버전                                  | 업그레이드, 또는 `--token` 사용                                                                    |
+| 메시지                                    | 원인                                                                      | 해결                                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `… does not resolve on this machine`      | 도메인 오타, 또는 공유기가 사설 IP를 가리키는 공용 DNS 응답을 버림        | 철자와 DNS 확인, 또는 인증서의 호스트명을 피어의 hosts 파일에 등록                                 |
+| `… presented a certificate … not trust`   | 루트가 mkcert 인증서를 사용                                               | `NODE_EXTRA_CA_CERTS`를 루트의 `rootCA.pem`으로 설정하거나 공인 인증서 사용                        |
+| `… certificate issued for another name`   | IP 주소나 인증서에 없는 호스트명으로 join                                 | `root.<도메인>`처럼 인증서에 포함된 호스트명으로 join                                              |
+| `… does not speak HTTPS`                  | 루트의 평문 HTTP 포트를 지정함                                            | 루트의 `httpsPort`(설정하지 않았다면 3443) 사용                                                    |
+| `… refused the connection`                | 루트에서 dev-proxy가 꺼져 있거나 `httpsPort`가 443도, 이 머신의 값도 아님 | 실행; 루트에서 `dev-proxy config set httpsPort 443`, 또는 `https://root.<도메인>:<httpsPort>` 지정 |
+| `… did not answer`                        | 다른 네트워크, VPN, 게스트 Wi-Fi, 방화벽                                  | 두 머신을 같은 LAN에 두기                                                                          |
+| `the root proxy does not support pairing` | 루트의 dev-proxy가 1.11 이전 버전                                         | 업그레이드, 또는 `--token` 사용                                                                    |
 
 루트에서는 `dev-proxy doctor` → **Peers**가 반대편에서 같은 내용을 보여줍니다.
 

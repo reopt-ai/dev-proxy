@@ -229,12 +229,12 @@ With public DNS pointing at one machine (the **root**), a second machine can tak
 
 Remote peers require HTTPS with a certificate they trust and a matching hostname. There is no plaintext fallback.
 
-| Root setup                                                           | How peers join                                                                   |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| public wildcard DNS + publicly trusted certificate + `httpsPort` 443 | `peer join example.dev`                                                          |
-| trusted certificate on another HTTPS port                            | `peer join https://root.example.dev:3443`                                        |
-| mkcert certificate                                                   | trust the root's CA in Node.js, then use the HTTPS hostname                      |
-| no wildcard DNS                                                      | add `root.example.dev` to the peer's DNS or hosts file, matching the certificate |
+| Root setup                                                                   | How peers join                                                                   |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| public wildcard DNS + publicly trusted certificate + `httpsPort` 443 or 3443 | `peer join example.dev`                                                          |
+| trusted certificate on another HTTPS port                                    | `peer join https://root.example.dev:8443`                                        |
+| mkcert certificate                                                           | trust the root's CA in Node.js, then use the HTTPS hostname                      |
+| no wildcard DNS                                                              | add `root.example.dev` to the peer's DNS or hosts file, matching the certificate |
 
 For mkcert, copy only the root's `rootCA.pem` to the peer (never `rootCA-key.pem`) and set `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem` when running peer commands. Keep this setting for `peer run`, `claim`, `release` and `list`, not just `join`. The root can turn its HTTP listener off. `dev-proxy doctor` → **Peers** reports the required HTTPS origin and trust setup.
 
@@ -247,7 +247,7 @@ dev-proxy peer run studio --port 3001 -- pnpm dev          # claim studio while 
 
 `peer join <domain>` reaches the root at `https://root.<domain>` (the wildcard record already resolves it, so nobody needs the root's IP) and asks to pair. The root's TUI shows the machine's name, address and the same code; press `A` then `Y` there to approve, or `D` to deny. No secret is copied by hand: the peer generates its own token and the root stores only its hash. On the root, `dev-proxy peer devices` lists paired machines and `dev-proxy peer revoke <name>` unpairs one and releases the subdomains it had claimed.
 
-`peer join <domain>` uses HTTPS port 443; for another port, pass the full origin (`peer join https://root.example.dev:3443`). `--token <token>` skips approval using the root's own token from `~/.dev-proxy/peer-token`, and still requires HTTPS remotely. Existing joins stored as remote `http://…` in `~/.dev-proxy/peer.json` must be replaced by joining the HTTPS origin again. Commands on the root itself can continue to use literal loopback HTTP. `dev-proxy doctor` on a joined machine checks that the root still accepts its token.
+`peer join <domain>` tries `https://root.<domain>` on port 443, then on this machine's `httpsPort` (3443 unless configured). For any other port or hostname, pass the full origin (`peer join https://root.example.dev:8443`). `--token <token>` skips approval using the root's own token from `~/.dev-proxy/peer-token`, and still requires HTTPS remotely. A guessed `root.<domain>` must accept the token before it is saved; an explicit origin is saved as given, so it works while the root is down. Existing joins stored as remote `http://…` in `~/.dev-proxy/peer.json` must be replaced by joining the HTTPS origin again; a stored `http://localhost:<port>` keeps working as `http://127.0.0.1:<port>`. Commands on the root itself can continue to use literal loopback HTTP. `dev-proxy doctor` on a joined machine checks that the root still accepts its token.
 
 `peer run` claims `studio.<domain>` → `http://<this machine's LAN IP>:3001` when the command starts and releases it when the command exits (including Ctrl+C). Put it in the app's `dev` script and developers keep typing `pnpm dev`. The app must listen on `0.0.0.0`, not only `localhost` — Next.js does by default, Vite needs `vite --host`, and most other dev servers take `--host 0.0.0.0` or `HOST=0.0.0.0`. `peer claim` / `peer release` do the same without wrapping a command, and `peer list` shows every claim with its owner and reachability.
 
@@ -414,13 +414,15 @@ lsof -ti :3000 | xargs kill
 
 The error names the failure; the usual causes, in order:
 
-| Message                                   | Cause                                                                                | Fix                                                                                                     |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `… does not resolve on this machine`      | typo in the domain, or the router drops public DNS answers that point at private IPs | check spelling; fix DNS or add the certificate's hostname to the peer's hosts file                      |
-| `… presented a certificate … not trust`   | the root uses a mkcert certificate                                                   | set `NODE_EXTRA_CA_CERTS` to the root's `rootCA.pem`, or use a publicly trusted certificate             |
-| `… refused the connection`                | dev-proxy is not running on the root, or its `httpsPort` is not 443                  | start it; `dev-proxy config set httpsPort 443` on the root, or pass `https://root.<domain>:<httpsPort>` |
-| `… did not answer`                        | different network, VPN, guest Wi-Fi or a firewall in between                         | put both machines on the same LAN                                                                       |
-| `the root proxy does not support pairing` | the root runs a dev-proxy older than 1.11                                            | upgrade it, or pass `--token`                                                                           |
+| Message                                   | Cause                                                                                      | Fix                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `… does not resolve on this machine`      | typo in the domain, or the router drops public DNS answers that point at private IPs       | check spelling; fix DNS or add the certificate's hostname to the peer's hosts file                      |
+| `… presented a certificate … not trust`   | the root uses a mkcert certificate                                                         | set `NODE_EXTRA_CA_CERTS` to the root's `rootCA.pem`, or use a publicly trusted certificate             |
+| `… certificate issued for another name`   | joined by IP address or a name the certificate does not cover                              | join by `root.<domain>` or another hostname on the certificate                                          |
+| `… does not speak HTTPS`                  | the address points at the root's plain-HTTP port                                           | use the root's `httpsPort` (3443 unless configured)                                                     |
+| `… refused the connection`                | dev-proxy is not running on the root, or its `httpsPort` is neither 443 nor this machine's | start it; `dev-proxy config set httpsPort 443` on the root, or pass `https://root.<domain>:<httpsPort>` |
+| `… did not answer`                        | different network, VPN, guest Wi-Fi or a firewall in between                               | put both machines on the same LAN                                                                       |
+| `the root proxy does not support pairing` | the root runs a dev-proxy older than 1.11                                                  | upgrade it, or pass `--token`                                                                           |
 
 On the root, `dev-proxy doctor` → **Peers** reports the same from the other side.
 

@@ -24,6 +24,7 @@ const {
   defaultOwner,
   fetchPairStatus,
   fetchPeers,
+  isExplicitRoot,
   normalizeRoot,
   readPeerClientConfig,
   release,
@@ -63,6 +64,13 @@ describe("normalizeRoot", () => {
     expect(normalizeRoot("https://box.lan:3443", 3000)).toBe("https://box.lan:3443");
   });
 
+  it("pins plain-HTTP localhost to 127.0.0.1 but keeps the TLS name as written", () => {
+    expect(normalizeRoot("localhost", 3000)).toBe("http://127.0.0.1:3000");
+    expect(normalizeRoot("http://localhost:3100", 3000)).toBe("http://127.0.0.1:3100");
+    // The certificate is checked against the name; 127.0.0.1 is rarely in its SANs.
+    expect(normalizeRoot("https://localhost:3443", 3000)).toBe("https://localhost:3443");
+  });
+
   it("rejects paths and garbage", () => {
     expect(normalizeRoot("box.lan/proxy", 3000)).toBeNull();
     expect(normalizeRoot("http://box.lan/?x=1", 3000)).toBeNull();
@@ -84,6 +92,15 @@ describe("peer client config", () => {
       token: "t",
     });
     expect(readPeerClientConfig()).toEqual({ root: "https://r:3443", token: "t" });
+  });
+
+  it("reads a legacy loopback join as the literal address", () => {
+    // `peer join localhost` used to save this; plain HTTP now needs a literal IP.
+    files.set(
+      PEER_CLIENT_PATH,
+      JSON.stringify({ root: "http://localhost:3000", token: "t" }),
+    );
+    expect(readPeerClientConfig()).toEqual({ root: "http://127.0.0.1:3000", token: "t" });
   });
 
   it("treats a missing or malformed file as not joined", () => {
@@ -265,15 +282,27 @@ describe("rootCandidates", () => {
     expect(rootCandidates("127.0.0.1", 3000)).toEqual(["http://127.0.0.1:3000"]);
     expect(rootCandidates("[::1]", 3000)).toEqual(["http://[::1]:3000"]);
   });
-  it("tries root.<domain> over TLS first for a bare hostname", () => {
-    expect(rootCandidates("example.dev", 3000)).toEqual(["https://root.example.dev"]);
-    expect(rootCandidates("root.example.dev", 3000)).toEqual([
+  it("tries root.<domain> over TLS on 443, then on the default httpsPort", () => {
+    const guesses = ["https://root.example.dev", "https://root.example.dev:3443"];
+    expect(rootCandidates("example.dev", 3000)).toEqual(guesses);
+    expect(rootCandidates("root.example.dev", 3000)).toEqual(guesses);
+  });
+
+  it("guesses this machine's own httpsPort for the root", () => {
+    expect(rootCandidates("example.dev", 3000, 8443)).toEqual([
+      "https://root.example.dev",
+      "https://root.example.dev:8443",
+    ]);
+    expect(rootCandidates("example.dev", 3000, 443)).toEqual([
       "https://root.example.dev",
     ]);
   });
 
   it("uses only HTTPS when this machine's HTTP listener is off", () => {
-    expect(rootCandidates("example.dev", null)).toEqual(["https://root.example.dev"]);
+    expect(rootCandidates("example.dev", null)).toEqual([
+      "https://root.example.dev",
+      "https://root.example.dev:3443",
+    ]);
   });
 
   it("uses an IP, an explicit port or a full origin exactly as given", () => {
@@ -287,6 +316,26 @@ describe("rootCandidates", () => {
 
   it("returns nothing for garbage", () => {
     expect(rootCandidates("box.lan/proxy", 3000)).toEqual([]);
+  });
+});
+
+describe("isExplicitRoot", () => {
+  it("treats a scheme, a port, an IP or localhost as one exact address", () => {
+    for (const input of [
+      "https://root.example.dev",
+      "box.lan:3100",
+      "box.lan:80",
+      "192.168.1.10",
+      "[fd12::1]",
+      "localhost",
+    ]) {
+      expect(isExplicitRoot(input), input).toBe(true);
+    }
+  });
+
+  it("treats a bare hostname as a guess", () => {
+    expect(isExplicitRoot("example.dev")).toBe(false);
+    expect(isExplicitRoot("root.example.dev")).toBe(false);
   });
 });
 

@@ -205,6 +205,27 @@ describe("explainJoinFailure", () => {
     expect(result.hint).toContain("mkcert");
   });
 
+  it("tells a plain-HTTP port apart from an untrusted certificate", () => {
+    const result = explainJoinFailure(
+      [net("https://192.168.1.10:3000", "ERR_SSL_WRONG_VERSION_NUMBER")],
+      "192.168.1.10:3000",
+    );
+    expect(result.error).toBe("192.168.1.10:3000 does not speak HTTPS");
+    expect(result.hint).toContain("httpsPort");
+    expect(result.hint).not.toContain("NODE_EXTRA_CA_CERTS");
+  });
+
+  it("tells a certificate for another name apart from an untrusted one", () => {
+    const result = explainJoinFailure(
+      [net("https://192.168.1.10", "ERR_TLS_CERT_ALTNAME_INVALID")],
+      "192.168.1.10",
+    );
+    expect(result.error).toBe(
+      "192.168.1.10 presented a certificate issued for another name",
+    );
+    expect(result.hint).not.toContain("NODE_EXTRA_CA_CERTS");
+  });
+
   it("recognises refused and unanswered connections", () => {
     expect(
       explainJoinFailure(
@@ -232,19 +253,37 @@ describe("explainJoinFailure", () => {
 
 describe("joinWithToken", () => {
   it("does not save an explicit insecure remote root for an unattended join", async () => {
-    expect(await joinWithToken(["http://192.168.1.10:3000"], "secret")).toMatchObject({
+    expect(
+      await joinWithToken(["http://192.168.1.10:3000"], "secret", { explicit: true }),
+    ).toMatchObject({
       ok: false,
       error: expect.stringContaining("requires HTTPS") as string,
     });
     expect(fetchPeers).not.toHaveBeenCalled();
   });
   it("trusts a single explicit address without contacting it", async () => {
-    expect(await joinWithToken(["https://root.example.dev:3443"], "tok")).toEqual({
+    expect(
+      await joinWithToken(["https://root.example.dev:3443"], "tok", { explicit: true }),
+    ).toEqual({
       ok: true,
       root: "https://root.example.dev:3443",
       token: "tok",
     });
     expect(fetchPeers).not.toHaveBeenCalled();
+  });
+
+  it("checks a single guessed address before saving it", async () => {
+    fetchPeers.mockRejectedValue(
+      new PeerApiError("cannot reach root", undefined, "ENOTFOUND"),
+    );
+    expect(await joinWithToken(["https://root.example.dev"], "tok")).toEqual({
+      ok: false,
+      error: "cannot reach root",
+    });
+    expect(fetchPeers).toHaveBeenCalledWith({
+      root: "https://root.example.dev",
+      token: "tok",
+    });
   });
 
   it("picks the first guessed address that accepts the token", async () => {

@@ -316,7 +316,6 @@ function checkPort(port: number | null): Promise<CheckResult> {
 
 interface PeerReadiness {
   domain: string;
-  httpPort: number | null;
   httpsPort: number;
   cert: CertKind;
   /** Where `root.<domain>` resolves to, or null when it does not. */
@@ -413,7 +412,6 @@ async function checkPeersSection(): Promise<CheckResult[]> {
   ]);
   const results = describePeerReadiness({
     domain: config.domain,
-    httpPort: config.port,
     httpsPort: config.httpsPort,
     cert: certKind(),
     rootAddress,

@@ -64,7 +64,19 @@ export function explainJoinFailure(
   if (all((c) => c === "ENOTFOUND" || c === "EAI_AGAIN")) {
     return {
       error: `${hostnameOf(last.root)} does not resolve on this machine`,
-      hint: `check the spelling of "${input}" and whether the dev hostname resolves to the root's LAN address`,
+      hint: `check the spelling of "${input}" and whether the dev hostname resolves to the root's LAN address; if the root is not at root.<domain>, pass its full origin`,
+    };
+  }
+  if (tls?.code === "ERR_SSL_WRONG_VERSION_NUMBER") {
+    return {
+      error: `${hostOf(tls.root)} does not speak HTTPS`,
+      hint: "that is the root's plain-HTTP port; remote peers must use its httpsPort (3443 unless configured)",
+    };
+  }
+  if (tls?.code === "ERR_TLS_CERT_ALTNAME_INVALID") {
+    return {
+      error: `${hostOf(tls.root)} presented a certificate issued for another name`,
+      hint: "join by a hostname the root's certificate covers (e.g. root.<domain>), not by IP address",
     };
   }
   if (tls) {
@@ -76,7 +88,7 @@ export function explainJoinFailure(
   if (all((c) => c === "ECONNREFUSED")) {
     return {
       error: `${hostOf(last.root)} refused the connection`,
-      hint: "is dev-proxy running on the root? its httpsPort should be 443 for `peer join <domain>`; otherwise pass host:port",
+      hint: "is dev-proxy running on the root? if its httpsPort is not 443 or this machine's, pass https://root.<domain>:<httpsPort>",
     };
   }
   if (all((c) => c === "ETIMEDOUT" || c === "EHOSTUNREACH" || c === "ENETUNREACH")) {
@@ -108,10 +120,13 @@ function hostnameOf(root: string): string {
 export async function joinWithToken(
   candidates: string[],
   token: string,
+  /** The user named the address; nothing in `candidates` was guessed. */
+  { explicit = false }: { explicit?: boolean } = {},
 ): Promise<JoinOutcome> {
   const [only] = candidates;
-  // A single explicit address is trusted as given so joining works while the root is down.
-  if (candidates.length === 1 && only) {
+  // An explicit address is trusted as given so joining works while the root
+  // is down. A guess must answer first, or a wrong one would be saved.
+  if (explicit && candidates.length === 1 && only) {
     try {
       requireSecureControlRoot(only);
       return { ok: true, root: only, token };
@@ -122,7 +137,6 @@ export async function joinWithToken(
   let lastError = "no root address to try";
   for (const root of candidates) {
     try {
-      requireSecureControlRoot(root);
       await fetchPeers({ root, token });
       return { ok: true, root, token };
     } catch (err) {

@@ -240,7 +240,7 @@ dev-proxy automatically generates wildcard TLS certificates on first run when mk
 
 To use a certificate you issued yourself (for example a Let's Encrypt wildcard so other devices trust it), set `certPath` and `keyPath` in `~/.dev-proxy/config.json`. Renewed files are picked up without a restart. See [Access from other devices](../../README.md#access-from-other-devices) in the README for the full setup.
 
-Remote `peer join` and subsequent control calls require HTTPS; there is no HTTP fallback. With mkcert, install only the root CA certificate (`rootCA.pem`, never its private key) on the peer and set `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem` for peer commands. The HTTPS hostname must match the certificate and resolve to the root. Use `peer join https://root.<domain>:3443` when `httpsPort` is not 443. Existing remote HTTP joins must be replaced by joining the HTTPS origin again.
+Remote `peer join` and subsequent control calls require HTTPS; there is no HTTP fallback. With mkcert, install only the root CA certificate (`rootCA.pem`, never its private key) on the peer and set `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem` for peer commands. The HTTPS hostname must match the certificate and resolve to the root. `peer join <domain>` tries `https://root.<domain>` on 443 and then on the peer's own `httpsPort` (3443 unless configured); for any other port, pass the full origin, e.g. `peer join https://root.<domain>:8443`. Existing remote HTTP joins must be replaced by joining the HTTPS origin again.
 
 ## Step 6: Verify Installation
 
