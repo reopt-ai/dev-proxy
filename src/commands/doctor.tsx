@@ -316,7 +316,6 @@ function checkPort(port: number | null): Promise<CheckResult> {
 
 interface PeerReadiness {
   domain: string;
-  httpPort: number | null;
   httpsPort: number;
   cert: CertKind;
   /** Where `root.<domain>` resolves to, or null when it does not. */
@@ -334,7 +333,7 @@ function describePeerReadiness(r: PeerReadiness): CheckResult[] {
     results.push({
       ok: false,
       warn: true,
-      label: `${rootHost} does not resolve — peers must use \`peer join <this machine's IP>\``,
+      label: `${rootHost} does not resolve — configure DNS or hosts to point it at this machine's LAN address`,
     });
   } else if (classifyAddress(r.rootAddress, r.lanAddresses) === "lan") {
     results.push({
@@ -345,30 +344,23 @@ function describePeerReadiness(r: PeerReadiness): CheckResult[] {
     results.push({
       ok: false,
       warn: true,
-      label: `${rootHost} → ${r.rootAddress} (not this machine's LAN address — peers must use \`peer join <ip>\`)`,
+      label: `${rootHost} → ${r.rootAddress} (not this machine's LAN address — configure DNS or hosts on the peer)`,
     });
   }
 
-  const httpFallback =
-    r.httpPort === null ? null : `plain HTTP on :${String(r.httpPort)}`;
-  if (r.cert === "public" && r.httpsPort === 443) {
-    results.push({ ok: true, label: `peers can join over https://${rootHost}` });
-  } else if (r.cert === "public") {
+  const origin = `https://${rootHost}${r.httpsPort === 443 ? "" : `:${String(r.httpsPort)}`}`;
+  if (r.cert === "public") {
+    results.push({ ok: true, label: `peers can join over ${origin}` });
+  } else if (r.cert === "mkcert") {
     results.push({
       ok: false,
       warn: true,
-      label: `httpsPort is ${String(r.httpsPort)} — \`peer join\` ${httpFallback ? `falls back to ${httpFallback}` : "has nothing to fall back to"}; set httpsPort 443`,
-    });
-  } else if (httpFallback) {
-    results.push({
-      ok: false,
-      warn: true,
-      label: `${r.cert === "mkcert" ? "mkcert certificate is not trusted on other machines" : "no certificate"} — peers join over ${httpFallback}`,
+      label: `peers need to trust the mkcert CA in Node.js (NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem), then join ${origin}`,
     });
   } else {
     results.push({
       ok: false,
-      label: `${r.cert === "mkcert" ? "mkcert certificate is not trusted on other machines" : "no certificate"} and the HTTP listener is off — peers cannot join`,
+      label: "no certificate — remote peers require HTTPS and cannot join",
     });
   }
 
@@ -420,7 +412,6 @@ async function checkPeersSection(): Promise<CheckResult[]> {
   ]);
   const results = describePeerReadiness({
     domain: config.domain,
-    httpPort: config.port,
     httpsPort: config.httpsPort,
     cert: certKind(),
     rootAddress,

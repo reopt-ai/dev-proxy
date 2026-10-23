@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Real fs for creating temp test files (separate from mocked fs)
@@ -31,6 +32,7 @@ const { __testing, CONFIG_DIR, GLOBAL_CONFIG_PATH, PROJECT_CONFIG_NAME, reloadCo
 const {
   parsePort,
   parseOptionalPort,
+  parseTimeout,
   resolveFilePath,
   loadJson,
   loadProjectConfig,
@@ -106,6 +108,23 @@ describe("parseOptionalPort", () => {
     expect(parseOptionalPort("port", undefined, 3000)).toBe(3000);
     expect(parseOptionalPort("port", 80, 3000)).toBe(80);
     expect(parseOptionalPort("port", "off", 3000)).toBe(3000);
+  });
+});
+
+describe("parseTimeout", () => {
+  it("reads seconds into milliseconds and maps false to no deadline", () => {
+    expect(parseTimeout("t", undefined, 10)).toBe(10_000);
+    expect(parseTimeout("t", 2.5, 10)).toBe(2500);
+    expect(parseTimeout("t", false, 10)).toBeNull();
+  });
+
+  it("falls back on anything that is not a positive number of seconds", () => {
+    for (const raw of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "30", null, true]) {
+      expect(parseTimeout("timeouts.connect", raw, 10), String(raw)).toBe(10_000);
+    }
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Ignoring timeouts.connect"),
+    );
   });
 });
 
@@ -282,9 +301,149 @@ describe("resolveProjectConfigFile", () => {
 // ── loadJsConfig ─────────────────────────────────────────────
 
 describe("loadJsConfig", () => {
+  it("discards module state after each load instead of retaining import revisions", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    realFs.writeFileSync(
+      configPath,
+      `
+      globalThis.__devProxyConfigLoads = (globalThis.__devProxyConfigLoads ?? 0) + 1;
+      export default { routes: { api: "http://localhost:" + (4000 + globalThis.__devProxyConfigLoads) } };
+    `,
+    );
+    try {
+      for (let i = 0; i < 5; i++) {
+        expect(await loadJsConfig(configPath)).toMatchObject({
+          routes: { api: "http://localhost:4001" },
+        });
+        await delay(2);
+      }
+    } finally {
+      Reflect.deleteProperty(globalThis, "__devProxyConfigLoads");
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("reloads relative imports along with the project config", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    const dependency = join(tmpDir, "routes.mjs");
+    realFs.writeFileSync(
+      configPath,
+      'import routes from "./routes.mjs"; export default { routes };',
+    );
+    try {
+      realFs.writeFileSync(
+        dependency,
+        'export default { api: "http://localhost:4000" };',
+      );
+      expect(await loadJsConfig(configPath)).toMatchObject({
+        routes: { api: "http://localhost:4000" },
+      });
+      realFs.writeFileSync(
+        dependency,
+        'export default { api: "http://localhost:4001" };',
+      );
+      await delay(2);
+      expect(await loadJsConfig(configPath)).toMatchObject({
+        routes: { api: "http://localhost:4001" },
+      });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("bounds configuration evaluation time", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    realFs.writeFileSync(
+      configPath,
+      "await new Promise(r => setTimeout(r, 300)); export default { routes: {} };",
+    );
+    try {
+      expect(await loadJsConfig(configPath, 50)).toBeNull();
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining("timed out"));
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
   it("returns null and logs error for non-existent file", async () => {
     const result = await loadJsConfig("/nonexistent/dev-proxy.config.js");
     expect(result).toBeNull();
+  });
+
+  it("loads named config exports without trying to transfer unrelated functions", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    realFs.writeFileSync(
+      configPath,
+      'export const routes = { api: "http://localhost:4000" }; export const helper = () => 1;',
+    );
+    try {
+      expect(await loadJsConfig(configPath)).toEqual({
+        routes: { api: "http://localhost:4000" },
+      });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("reports a config that exits without returning instead of waiting for the deadline", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    realFs.writeFileSync(configPath, "process.exit(0);");
+    try {
+      expect(await loadJsConfig(configPath)).toBeNull();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining("exited before returning"),
+      );
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("stops background work created by a config after loading it", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    const activityPath = join(tmpDir, "activity.txt");
+    realFs.writeFileSync(activityPath, "");
+    realFs.writeFileSync(
+      configPath,
+      `
+      import { appendFileSync } from "node:fs";
+      setInterval(() => appendFileSync(${JSON.stringify(activityPath)}, "."), 20);
+      export default { routes: {} };
+    `,
+    );
+    try {
+      expect(await loadJsConfig(configPath)).toEqual({ routes: {} });
+      const activity = realFs.readFileSync(activityPath, "utf-8");
+      await delay(80);
+      expect(realFs.readFileSync(activityPath, "utf-8")).toBe(activity);
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it("accepts URL objects and drops functions instead of failing to clone them", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    realFs.writeFileSync(
+      configPath,
+      `export default {
+        routes: { web: new URL("http://localhost:3000") },
+        worktreeConfig: { directory: "../wt", portRange: [4000, 4100], describe() {} },
+      };`,
+    );
+    try {
+      expect(await loadJsConfig(configPath)).toEqual({
+        routes: { web: "http://localhost:3000/" },
+        worktreeConfig: { directory: "../wt", portRange: [4000, 4100] },
+      });
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
   });
 
   it("loads routes from a real JS config file", async () => {
@@ -480,8 +639,68 @@ describe("loadConfig", () => {
       httpsPort: 3443,
       certPath: undefined,
       keyPath: undefined,
+      timeouts: { connectMs: 10_000, responseHeadersMs: 60_000 },
       projects: [],
     });
+  });
+
+  it("reads upstream timeouts in seconds, with false disabling one", async () => {
+    fsMock.existsSync.mockImplementation((p: string) => p === GLOBAL_CONFIG_PATH);
+    fsMock.readFileSync.mockReturnValue(
+      JSON.stringify({ timeouts: { connect: 2.5, responseHeaders: false } }),
+    );
+
+    expect((await loadConfig()).timeouts).toEqual({
+      connectMs: 2500,
+      responseHeadersMs: null,
+    });
+  });
+
+  it("evaluates JS project configs concurrently and keeps registration order", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const first = join(tmpDir, "first");
+    const second = join(tmpDir, "second");
+    const marker = join(tmpDir, "second-started");
+    realFs.mkdirSync(first);
+    realFs.mkdirSync(second);
+    // The first config only finishes once the second has started, so loading
+    // them one after another would time it out.
+    realFs.writeFileSync(
+      join(first, "dev-proxy.config.mjs"),
+      `import { existsSync } from "node:fs";
+      const deadline = Date.now() + 2000;
+      while (!existsSync(${JSON.stringify(marker)})) {
+        if (Date.now() > deadline) throw new Error("evaluated alone");
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      export default { routes: { api: "http://localhost:4001" } };`,
+    );
+    realFs.writeFileSync(
+      join(second, "dev-proxy.config.mjs"),
+      `import { writeFileSync } from "node:fs";
+      writeFileSync(${JSON.stringify(marker)}, "");
+      export default { routes: { api: "http://localhost:4002" } };`,
+    );
+    const configs = new Set([
+      join(first, "dev-proxy.config.mjs"),
+      join(second, "dev-proxy.config.mjs"),
+    ]);
+    fsMock.existsSync.mockImplementation(
+      (p: string) => p === GLOBAL_CONFIG_PATH || configs.has(p),
+    );
+    fsMock.readFileSync.mockImplementation((p: string) =>
+      p === GLOBAL_CONFIG_PATH ? JSON.stringify({ projects: [first, second] }) : "",
+    );
+
+    try {
+      const result = await loadConfig();
+      expect(result.projects.map((p) => [p.path, p.routes])).toEqual([
+        [first, { api: "http://localhost:4001" }],
+        [second, { api: "http://localhost:4002" }],
+      ]);
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
   });
 
   it("reads domain, port, httpsPort from global config", async () => {
@@ -560,6 +779,32 @@ describe("reloadConfig", () => {
     // Verify the live singleton is updated
     expect(mod.config.domain).toBe("reloaded.test");
     expect(mod.config.port).toBe(7777);
+  });
+
+  it("lets only the newest of overlapping reloads apply", async () => {
+    const tmpDir = realFs.mkdtempSync(join(tmpdir(), "dev-proxy-test-"));
+    const configPath = join(tmpDir, "dev-proxy.config.mjs");
+    realFs.writeFileSync(
+      configPath,
+      "await new Promise(r => setTimeout(r, 200)); export default { routes: {} };",
+    );
+    const files = new Map([
+      [GLOBAL_CONFIG_PATH, JSON.stringify({ domain: "stale.test", projects: [tmpDir] })],
+    ]);
+    fsMock.existsSync.mockImplementation((p: string) => files.has(p) || p === configPath);
+    fsMock.readFileSync.mockImplementation((p: string) => files.get(p) ?? "");
+
+    try {
+      // A save during a slow evaluation starts a second, faster reload.
+      const stale = reloadConfig();
+      files.set(GLOBAL_CONFIG_PATH, JSON.stringify({ domain: "fresh.test" }));
+      await reloadConfig();
+      expect(mod.config.domain).toBe("fresh.test");
+      await stale;
+      expect(mod.config.domain).toBe("fresh.test");
+    } finally {
+      realFs.rmSync(tmpDir, { recursive: true });
+    }
   });
 
   it("returns default values after reload with missing config", async () => {

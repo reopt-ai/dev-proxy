@@ -16,6 +16,7 @@ const mockConfig: ResolvedConfig = {
   domain: "test.dev",
   port: 3000,
   httpsPort: 3443,
+  timeouts: { connectMs: 10_000, responseHeadersMs: 60_000 },
   projects: [
     {
       path: "/projects/alpha",
@@ -440,11 +441,28 @@ describe("getTarget", () => {
 
   it("returns null for empty host string", () => {
     const result = getTarget("");
-    // Empty host parses to app="" worktree=null, no route for ""
-    // Falls back to wildcard (http://localhost:5000)
-    expect(result.url).not.toBeNull();
-    expect(result.url?.origin).toBe("http://localhost:5000");
+    expect(result.url).toBeNull();
     expect(result.worktree).toBeNull();
+  });
+
+  it.each([
+    "studio.attacker.invalid",
+    "unknown.attacker.invalid",
+    "feature--studio.attacker.invalid",
+    "studio.test.dev.attacker.invalid",
+    "studio.eviltest.dev",
+    "studio.test.dev@attacker.invalid",
+    "studio.test.dev/path",
+    "studio.test.dev:99999",
+    "studio.test.dev:garbage",
+  ])("rejects untrusted or malformed Host %s before any routing lookup", (host) => {
+    expect(getTarget(host)).toEqual({ url: null, worktree: null, peer: null });
+    expect(mockWorktreeTarget).not.toHaveBeenCalled();
+  });
+
+  it("accepts the configured domain with case folding and a DNS trailing dot", () => {
+    expect(getTarget("Studio.Test.Dev.:3000").url?.origin).toBe("http://localhost:4000");
+    expect(getTarget("Test.Dev.:3000").url?.origin).toBe("http://localhost:5000");
   });
 
   it("empty worktree prefix falls through to normal routing", () => {

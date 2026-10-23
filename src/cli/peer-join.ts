@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { hashToken, PAIR_TTL_MS } from "../proxy/pairing.js";
+import { requireSecureControlRoot } from "../proxy/network.js";
 import { fetchPairStatus, fetchPeers, PeerApiError, requestPair } from "./peer-client.js";
 
 /**
@@ -63,19 +64,31 @@ export function explainJoinFailure(
   if (all((c) => c === "ENOTFOUND" || c === "EAI_AGAIN")) {
     return {
       error: `${hostnameOf(last.root)} does not resolve on this machine`,
-      hint: `check the spelling of "${input}"; if the root uses public DNS, the router may drop answers that point at private IPs (DNS rebinding protection) — try \`peer join <root's LAN IP>\``,
+      hint: `check the spelling of "${input}" and whether the dev hostname resolves to the root's LAN address; if the root is not at root.<domain>, pass its full origin`,
+    };
+  }
+  if (tls?.code === "ERR_SSL_WRONG_VERSION_NUMBER") {
+    return {
+      error: `${hostOf(tls.root)} does not speak HTTPS`,
+      hint: "that is the root's plain-HTTP port; remote peers must use its httpsPort (3443 unless configured)",
+    };
+  }
+  if (tls?.code === "ERR_TLS_CERT_ALTNAME_INVALID") {
+    return {
+      error: `${hostOf(tls.root)} presented a certificate issued for another name`,
+      hint: "join by a hostname the root's certificate covers (e.g. root.<domain>), not by IP address",
     };
   }
   if (tls) {
     return {
       error: `${hostOf(tls.root)} presented a certificate this machine does not trust`,
-      hint: "mkcert certificates are only trusted where the CA is installed — join with the root's LAN IP (plain HTTP) or give the root a publicly trusted certificate",
+      hint: "trust the root's mkcert CA in Node.js (NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem) or use a publicly trusted certificate; remote pairing requires HTTPS",
     };
   }
   if (all((c) => c === "ECONNREFUSED")) {
     return {
       error: `${hostOf(last.root)} refused the connection`,
-      hint: "is dev-proxy running on the root? its httpsPort should be 443 for `peer join <domain>`; otherwise pass host:port",
+      hint: "is dev-proxy running on the root? if its httpsPort is not 443 or this machine's, pass https://root.<domain>:<httpsPort>",
     };
   }
   if (all((c) => c === "ETIMEDOUT" || c === "EHOSTUNREACH" || c === "ENETUNREACH")) {
@@ -107,10 +120,20 @@ function hostnameOf(root: string): string {
 export async function joinWithToken(
   candidates: string[],
   token: string,
+  /** The user named the address; nothing in `candidates` was guessed. */
+  { explicit = false }: { explicit?: boolean } = {},
 ): Promise<JoinOutcome> {
   const [only] = candidates;
-  // A single explicit address is trusted as given so joining works while the root is down.
-  if (candidates.length === 1 && only) return { ok: true, root: only, token };
+  // An explicit address is trusted as given so joining works while the root
+  // is down. A guess must answer first, or a wrong one would be saved.
+  if (explicit && candidates.length === 1 && only) {
+    try {
+      requireSecureControlRoot(only);
+      return { ok: true, root: only, token };
+    } catch (err) {
+      return { ok: false, error: message(err) };
+    }
+  }
   let lastError = "no root address to try";
   for (const root of candidates) {
     try {

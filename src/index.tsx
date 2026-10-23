@@ -8,7 +8,6 @@ import {
   config,
   GLOBAL_CONFIG_PATH,
   PROJECT_CONFIG_NAME,
-  PROJECT_WORKTREES_NAME,
 } from "./proxy/config.js";
 import { rebuildRoutes } from "./proxy/routes.js";
 import { loadRegistry, stopRegistry } from "./proxy/worktrees.js";
@@ -180,13 +179,12 @@ watchFile(dirname(GLOBAL_CONFIG_PATH), basename(GLOBAL_CONFIG_PATH));
 watchPeersFile();
 startPeerProbes();
 
-// Watch each project config (primary config file + worktrees state file)
+// Worktree state has its own registry watcher; changing ports does not require
+// evaluating every project's JS config again.
 for (const project of config.projects) {
   // Watch the primary config file (JS or legacy JSON)
   watchFile(dirname(project.configPath), basename(project.configPath));
-  // Always watch the worktrees state file. For JS-config projects, also watch
-  // the legacy .dev-proxy.json so projects mid-migration still hot-reload.
-  watchFile(project.path, PROJECT_WORKTREES_NAME);
+  // Keep watching legacy settings while projects are migrating.
   if (project.configType === "js") {
     watchFile(project.path, PROJECT_CONFIG_NAME);
   }

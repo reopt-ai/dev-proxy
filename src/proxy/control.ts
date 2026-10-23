@@ -10,6 +10,7 @@ import {
   type PeerEntry,
 } from "./peers.js";
 import { deviceIdForToken, pairCode, pairingStatus, requestPairing } from "./pairing.js";
+import { isLoopbackAddress, plainAddress } from "./network.js";
 
 /**
  * Control API served by the root proxy under `/_dev-proxy/`.
@@ -31,11 +32,6 @@ const MAX_BODY_BYTES = 4096;
 
 export function isControlPath(url: string | undefined): boolean {
   return url?.startsWith(CONTROL_PREFIX) === true;
-}
-
-/** Drop the IPv4-mapped IPv6 prefix so addresses read and compare as IPv4. */
-function plainAddress(address: string): string {
-  return address.startsWith("::ffff:") ? address.slice(7) : address;
 }
 
 /** Loopback, RFC 1918, link-local and CGNAT ranges — the only callers we accept. */
@@ -168,6 +164,13 @@ export function createControlHandler(
       send(res, 403, { error: "control API is only available from the local network" });
       return true;
     }
+    if (
+      !isLoopbackAddress(req.socket.remoteAddress) &&
+      !("encrypted" in req.socket && req.socket.encrypted === true)
+    ) {
+      send(res, 426, { error: "remote peer control requires HTTPS" });
+      return true;
+    }
     // Node clients never send Origin; a browser attaches it to every request
     // that could change state, and a web page has no business driving this API.
     if (req.headers.origin !== undefined) {
@@ -204,6 +207,12 @@ export function createControlHandler(
     if (req.method === "PUT" && sub) {
       void readJsonBody(req)
         .then((body) => {
+          // Body upload can outlive a revocation. Authorize the mutation against
+          // the current device registry, not the identity captured at headers.
+          if (!tokenMatches(bearer, token) && deviceIdForToken(bearer) !== deviceId) {
+            send(res, 401, { error: "peer credential was revoked" });
+            return;
+          }
           const target = typeof body.target === "string" ? body.target : "";
           const owner = typeof body.owner === "string" ? body.owner : "";
           // Remember which machine claimed it so revoking the machine frees the subdomain.

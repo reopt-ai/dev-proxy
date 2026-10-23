@@ -343,12 +343,16 @@ Nothing runs in the background on a peer: `peer join` exits once approved,
 and `peer run` lives only as long as the dev server it wraps. The root checks
 that a claim is still alive by probing the app's port itself.
 
-1. Ask the user for the root's dev domain (or its LAN address when there is
-   no wildcard DNS). `peer join <domain>` only works end-to-end when the
-   root has public wildcard DNS; with a publicly trusted certificate and
-   `httpsPort` 443 it goes over TLS, with mkcert it falls back to plain HTTP.
-   If the user is unsure, have them run `dev-proxy doctor` on the root and
-   read its **Peers** section.
+1. Ask the user for the root's dev domain. `peer join <domain>` reaches the
+   root at `https://root.<domain>` (port 443, then this machine's
+   `httpsPort`, 3443 unless configured), so `root.<domain>` must resolve to
+   the root — via wildcard DNS or a hosts entry — and this machine must trust
+   the root's certificate. With mkcert, copy only the root's `rootCA.pem`
+   (never `rootCA-key.pem`) and set `NODE_EXTRA_CA_CERTS=/path/to/rootCA.pem`
+   for every peer command. There is no plain-HTTP fallback. For any other
+   port, use the full origin (`https://root.<domain>:<httpsPort>`). If the
+   user is unsure, have them run `dev-proxy doctor` on the root and read its
+   **Peers** section.
 2. Join once. The command prints a code and waits until someone presses `A`
    and then `Y` in dev-proxy on the root machine — tell the user to approve it there and
    to check that the code matches:
@@ -364,10 +368,13 @@ that a claim is still alive by probing the app's port itself.
 
    If `peer join` fails, its message names the cause — read it before
    retrying: "does not resolve" is a typo or the router's DNS rebinding
-   protection (try the root's LAN IP), "certificate … not trust" means the
-   root uses mkcert (use its LAN IP), "refused" means the root is down or its
-   `httpsPort` is not 443, "did not answer" means a different network. Never
-   work around these by disabling TLS verification.
+   protection (add `root.<domain>` to the hosts file), "certificate … not
+   trust" means the root uses mkcert (set `NODE_EXTRA_CA_CERTS`),
+   "certificate issued for another name" means an IP or a name the
+   certificate does not cover, "does not speak HTTPS" means the plain-HTTP
+   port was given, "refused" means the root is down or uses another
+   `httpsPort`, "did not answer" means a different network. Never work around
+   these by disabling TLS verification.
 
 3. For each app this machine will run, wrap its dev script so the claim lives
    exactly as long as the dev server:
@@ -400,19 +407,18 @@ When the machine being set up is the root that others will join:
 - `dev-proxy peer devices` lists paired machines and
   `dev-proxy peer revoke <name>` unpairs one and releases the subdomains it
   had claimed.
-- `peer join <domain>` reaches the root at `https://root.<domain>`, which
-  needs the HTTPS port to be 443. On macOS an unprivileged process can bind
-  it, so offer `dev-proxy config set httpsPort 443` (then restart the proxy);
-  URLs also lose their `:3443` suffix. Otherwise `peer join <domain>` falls
-  back to plain HTTP on the proxy port (`http://root.<domain>:<port>`).
+- `peer join <domain>` reaches the root at `https://root.<domain>` on 443 or
+  the default 3443. For a custom `httpsPort`, peers pass the full origin. On
+  macOS an unprivileged process can bind 443, so offer
+  `dev-proxy config set httpsPort 443` (then restart the proxy); URLs also
+  lose their `:3443` suffix.
 - Reserve the root's LAN IP in the router's DHCP settings — the public DNS
   record and every peer depend on it.
 - `dev-proxy doctor` → **Peers** says whether `root.<domain>` resolves to this
-  machine and which path (`https://root.<domain>` or plain HTTP) peers can
-  use. Run it after changing ports or certificates.
-- With a publicly trusted certificate the root may run HTTPS only
-  (`dev-proxy config set port off`). Do not suggest this on a mkcert root —
-  peers could no longer join.
+  machine, the HTTPS origin peers join and whether they must trust the mkcert
+  CA. Run it after changing ports or certificates.
+- Peer control always uses HTTPS, so the root may run HTTPS only
+  (`dev-proxy config set port off`) when no local tool needs plain HTTP.
 
 ## Phase 4: DNS Setup
 

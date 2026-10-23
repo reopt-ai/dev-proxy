@@ -24,6 +24,7 @@ const {
   defaultOwner,
   fetchPairStatus,
   fetchPeers,
+  isExplicitRoot,
   normalizeRoot,
   readPeerClientConfig,
   release,
@@ -53,14 +54,21 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("normalizeRoot", () => {
-  it("fills in the scheme and default port", () => {
-    expect(normalizeRoot("192.168.1.10", 3000)).toBe("http://192.168.1.10:3000");
-    expect(normalizeRoot("box.lan:3100", 3000)).toBe("http://box.lan:3100");
+  it("defaults remote roots to HTTPS", () => {
+    expect(normalizeRoot("192.168.1.10", 3000)).toBe("https://192.168.1.10");
+    expect(normalizeRoot("box.lan:3100", 3000)).toBe("https://box.lan:3100");
   });
 
   it("leaves https on its own default port", () => {
     expect(normalizeRoot("https://box.lan", 3000)).toBe("https://box.lan");
     expect(normalizeRoot("https://box.lan:3443", 3000)).toBe("https://box.lan:3443");
+  });
+
+  it("pins plain-HTTP localhost to 127.0.0.1 but keeps the TLS name as written", () => {
+    expect(normalizeRoot("localhost", 3000)).toBe("http://127.0.0.1:3000");
+    expect(normalizeRoot("http://localhost:3100", 3000)).toBe("http://127.0.0.1:3100");
+    // The certificate is checked against the name; 127.0.0.1 is rarely in its SANs.
+    expect(normalizeRoot("https://localhost:3443", 3000)).toBe("https://localhost:3443");
   });
 
   it("rejects paths and garbage", () => {
@@ -78,12 +86,21 @@ describe("defaultOwner", () => {
 
 describe("peer client config", () => {
   it("round-trips through peer.json", () => {
-    writePeerClientConfig({ root: "http://r:3000", token: "t" });
+    writePeerClientConfig({ root: "https://r:3443", token: "t" });
     expect(JSON.parse(files.get(PEER_CLIENT_PATH) ?? "")).toEqual({
-      root: "http://r:3000",
+      root: "https://r:3443",
       token: "t",
     });
-    expect(readPeerClientConfig()).toEqual({ root: "http://r:3000", token: "t" });
+    expect(readPeerClientConfig()).toEqual({ root: "https://r:3443", token: "t" });
+  });
+
+  it("reads a legacy loopback join as the literal address", () => {
+    // `peer join localhost` used to save this; plain HTTP now needs a literal IP.
+    files.set(
+      PEER_CLIENT_PATH,
+      JSON.stringify({ root: "http://localhost:3000", token: "t" }),
+    );
+    expect(readPeerClientConfig()).toEqual({ root: "http://127.0.0.1:3000", token: "t" });
   });
 
   it("treats a missing or malformed file as not joined", () => {
@@ -103,8 +120,8 @@ describe("peer client config", () => {
       token: "local-token",
     });
 
-    writePeerClientConfig({ root: "http://r:3000", token: "t" });
-    expect(resolvePeerClient(3000)).toEqual({ root: "http://r:3000", token: "t" });
+    writePeerClientConfig({ root: "https://r:3443", token: "t" });
+    expect(resolvePeerClient(3000)).toEqual({ root: "https://r:3443", token: "t" });
   });
 
   it("resolvePeerClient uses loopback HTTPS when the HTTP listener is off", () => {
@@ -118,7 +135,26 @@ describe("peer client config", () => {
 });
 
 describe("API calls", () => {
-  const cfg = { root: "http://r:3000", token: "t" };
+  const cfg = { root: "https://r:3443", token: "t" };
+
+  it.each([
+    "http://192.168.1.10:3000",
+    "http://root.example.dev",
+    "http://[fd12::1]:3000",
+  ])("refuses to send a token or pairing request to %s", async (root) => {
+    await expect(fetchPeers({ root, token: "secret" })).rejects.toThrow(/requires HTTPS/);
+    await expect(requestPair(root, "peer", "hash")).rejects.toThrow(/requires HTTPS/);
+    await expect(fetchPairStatus(root, "id", "secret")).rejects.toThrow(/requires HTTPS/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows loopback HTTP and refuses redirects even from HTTPS", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { domain: "d.test", peers: {} }));
+    await fetchPeers({ root: "http://127.0.0.1:3000", token: "local" });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:3000/_dev-proxy/peers");
+    await fetchPeers(cfg);
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ redirect: "error" });
+  });
 
   it("fetchPeers sends the bearer token and returns domain + peers", async () => {
     fetchMock.mockResolvedValue(
@@ -127,7 +163,7 @@ describe("API calls", () => {
     const result = await fetchPeers(cfg);
     expect(result).toEqual({ domain: "d.test", peers: { a: { target: "http://x:1" } } });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://r:3000/_dev-proxy/peers");
+    expect(url).toBe("https://r:3443/_dev-proxy/peers");
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer t");
   });
@@ -144,7 +180,7 @@ describe("API calls", () => {
     expect(result.domain).toBe("d.test");
     expect(result.replaced?.owner).toBe("old");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://r:3000/_dev-proxy/peers/studio");
+    expect(url).toBe("https://r:3443/_dev-proxy/peers/studio");
     expect(init.method).toBe("PUT");
     expect(JSON.parse(init.body as string)).toEqual({
       target: "http://x:1",
@@ -177,7 +213,7 @@ describe("API calls", () => {
     const err = await fetchPeers(cfg).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PeerApiError);
     expect((err as Error).message).toBe(
-      "cannot reach root proxy at http://r:3000: ECONNREFUSED",
+      "cannot reach root proxy at https://r:3443: ECONNREFUSED",
     );
   });
 
@@ -188,7 +224,7 @@ describe("API calls", () => {
     fetchMock.mockRejectedValue(new TypeError("fetch failed", { cause }));
     await expect(fetchPeers(cfg)).rejects.toMatchObject({
       code: "ENOTFOUND",
-      message: "cannot reach root proxy at http://r:3000: getaddrinfo ENOTFOUND r",
+      message: "cannot reach root proxy at https://r:3443: getaddrinfo ENOTFOUND r",
     });
 
     const agg = new AggregateError([
@@ -241,33 +277,38 @@ describe("API calls", () => {
 });
 
 describe("rootCandidates", () => {
-  it("tries root.<domain> over TLS first for a bare hostname", () => {
-    expect(rootCandidates("example.dev", 3000)).toEqual([
+  it("keeps local HTTP available only through loopback IPs", () => {
+    expect(rootCandidates("localhost", 3000)).toEqual(["http://127.0.0.1:3000"]);
+    expect(rootCandidates("127.0.0.1", 3000)).toEqual(["http://127.0.0.1:3000"]);
+    expect(rootCandidates("[::1]", 3000)).toEqual(["http://[::1]:3000"]);
+  });
+  it("tries root.<domain> over TLS on 443, then on the default httpsPort", () => {
+    const guesses = ["https://root.example.dev", "https://root.example.dev:3443"];
+    expect(rootCandidates("example.dev", 3000)).toEqual(guesses);
+    expect(rootCandidates("root.example.dev", 3000)).toEqual(guesses);
+  });
+
+  it("guesses this machine's own httpsPort for the root", () => {
+    expect(rootCandidates("example.dev", 3000, 8443)).toEqual([
       "https://root.example.dev",
-      "http://root.example.dev",
-      "http://root.example.dev:3000",
-      "http://example.dev:3000",
+      "https://root.example.dev:8443",
     ]);
-    expect(rootCandidates("root.example.dev", 3000)).toEqual([
+    expect(rootCandidates("example.dev", 3000, 443)).toEqual([
       "https://root.example.dev",
-      "http://root.example.dev",
-      "http://root.example.dev:3000",
     ]);
   });
 
-  it("guesses 3000 for the root when this machine's HTTP listener is off", () => {
+  it("uses only HTTPS when this machine's HTTP listener is off", () => {
     expect(rootCandidates("example.dev", null)).toEqual([
       "https://root.example.dev",
-      "http://root.example.dev",
-      "http://root.example.dev:3000",
-      "http://example.dev:3000",
+      "https://root.example.dev:3443",
     ]);
   });
 
   it("uses an IP, an explicit port or a full origin exactly as given", () => {
-    expect(rootCandidates("192.168.1.10", 3000)).toEqual(["http://192.168.1.10:3000"]);
-    expect(rootCandidates("[fd12::1]", 3000)).toEqual(["http://[fd12::1]:3000"]);
-    expect(rootCandidates("box.lan:3100", 3000)).toEqual(["http://box.lan:3100"]);
+    expect(rootCandidates("192.168.1.10", 3000)).toEqual(["https://192.168.1.10"]);
+    expect(rootCandidates("[fd12::1]", 3000)).toEqual(["https://[fd12::1]"]);
+    expect(rootCandidates("box.lan:3100", 3000)).toEqual(["https://box.lan:3100"]);
     expect(rootCandidates("https://root.example.dev", 3000)).toEqual([
       "https://root.example.dev",
     ]);
@@ -275,6 +316,26 @@ describe("rootCandidates", () => {
 
   it("returns nothing for garbage", () => {
     expect(rootCandidates("box.lan/proxy", 3000)).toEqual([]);
+  });
+});
+
+describe("isExplicitRoot", () => {
+  it("treats a scheme, a port, an IP or localhost as one exact address", () => {
+    for (const input of [
+      "https://root.example.dev",
+      "box.lan:3100",
+      "box.lan:80",
+      "192.168.1.10",
+      "[fd12::1]",
+      "localhost",
+    ]) {
+      expect(isExplicitRoot(input), input).toBe(true);
+    }
+  });
+
+  it("treats a bare hostname as a guess", () => {
+    expect(isExplicitRoot("example.dev")).toBe(false);
+    expect(isExplicitRoot("root.example.dev")).toBe(false);
   });
 });
 

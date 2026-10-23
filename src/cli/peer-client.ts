@@ -6,6 +6,11 @@ import { resolve } from "node:path";
 import { CONFIG_DIR } from "../proxy/config.js";
 import { PEER_TOKEN_PATH, type PeerEntry } from "../proxy/peers.js";
 import type { PairStatus } from "../proxy/pairing.js";
+import {
+  hostAddress,
+  isLoopbackAddress,
+  requireSecureControlRoot,
+} from "../proxy/network.js";
 
 /**
  * Client side of the peer control API — used by `dev-proxy peer …` on machines
@@ -18,7 +23,7 @@ import type { PairStatus } from "../proxy/pairing.js";
 export const PEER_CLIENT_PATH = resolve(CONFIG_DIR, "peer.json");
 
 export interface PeerClientConfig {
-  /** Root proxy origin, e.g. `https://root.example.dev` or `http://192.168.1.10:3000`. */
+  /** Root origin: remote HTTPS or local loopback HTTP, e.g. `https://root.example.dev`. */
   root: string;
   token: string;
   /**
@@ -36,7 +41,8 @@ export function readPeerClientConfig(): PeerClientConfig | null {
         readFileSync(PEER_CLIENT_PATH, "utf-8"),
       ) as Partial<PeerClientConfig>;
       if (typeof data.root === "string" && typeof data.token === "string") {
-        return { root: data.root, token: data.token };
+        // `peer join localhost` used to save http://localhost:<port>.
+        return { root: pinLoopbackRoot(data.root), token: data.token };
       }
     }
   } catch {
@@ -46,6 +52,7 @@ export function readPeerClientConfig(): PeerClientConfig | null {
 }
 
 export function writePeerClientConfig(cfg: PeerClientConfig): void {
+  requireSecureControlRoot(cfg.root);
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(PEER_CLIENT_PATH, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 }
@@ -81,19 +88,44 @@ export function resolvePeerClient(
 }
 
 /**
- * Normalise `host`, `host:port` or a full origin into a root origin. The
- * default port is the proxy's plain-HTTP port, so it never applies to https.
+ * Plain HTTP is trusted only on a literal loopback address, never on a name.
+ * Over TLS the certificate is checked against the name, so that stays as written.
+ */
+function pinLoopbackRoot(root: string): string {
+  if (!URL.canParse(root)) return root;
+  const url = new URL(root);
+  if (url.protocol !== "http:" || url.hostname !== "localhost") return root;
+  url.hostname = "127.0.0.1";
+  return url.origin;
+}
+
+/**
+ * Normalise `host`, `host:port` or a full origin into a root origin.
+ * Remote roots default to HTTPS. Only loopback roots use the local
+ * plain-HTTP port.
  */
 export function normalizeRoot(input: string, defaultPort: number): string | null {
-  const withScheme = /^https?:\/\//.test(input) ? input : `http://${input}`;
   try {
-    const url = new URL(withScheme);
-    if (url.pathname !== "/" || url.search || url.hash) return null;
+    const explicitScheme = /^https?:\/\//.test(input);
+    const url = new URL(explicitScheme ? input : `https://${input}`);
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash)
+      return null;
+    const loopback =
+      url.hostname === "localhost" || isLoopbackAddress(hostAddress(url.hostname));
+    if (!explicitScheme && loopback) url.protocol = "http:";
     if (!url.port && url.protocol === "http:") url.port = String(defaultPort);
-    return url.origin;
+    return pinLoopbackRoot(url.origin);
   } catch {
     return null;
   }
+}
+
+/** A scheme, a port or an IP address names one root exactly; a bare hostname is a guess. */
+export function isExplicitRoot(input: string): boolean {
+  if (/^https?:\/\//.test(input) || /:\d+$/.test(input)) return true;
+  if (!URL.canParse(`http://${input}`)) return false;
+  const host = new URL(`http://${input}`).hostname;
+  return host === "localhost" || net.isIP(hostAddress(host)) !== 0;
 }
 
 /**
@@ -101,26 +133,22 @@ export function normalizeRoot(input: string, defaultPort: number): string | null
  *
  * A bare hostname is taken as the root's dev domain: with wildcard DNS
  * `root.<domain>` reaches the root over TLS without anyone knowing its IP.
- * The root's HTTP port is unknown here, so 80 and this machine's own port
- * are guessed next. Anything more specific (scheme, port or IP) is used
- * exactly as given.
+ * The root's `httpsPort` is unknown here, so 443 is tried first and then this
+ * machine's own (the default unless configured). Never downgrade to plain
+ * HTTP. An explicit address is used as given.
  */
-export function rootCandidates(input: string, defaultPort: number | null): string[] {
-  const guessPort = defaultPort ?? 3000;
-  const exact = normalizeRoot(input, guessPort);
+export function rootCandidates(
+  input: string,
+  defaultPort: number | null,
+  httpsPort = 3443,
+): string[] {
+  const exact = normalizeRoot(input, defaultPort ?? 3000);
   if (!exact) return [];
-  if (/^https?:\/\//.test(input)) return [exact];
-  const url = new URL(`http://${input}`);
-  const host = url.hostname;
-  if (url.port || net.isIP(host.replace(/^\[|\]$/g, "")) !== 0) return [exact];
+  if (isExplicitRoot(input)) return [exact];
+  const host = new URL(exact).hostname;
   const rootHost = host.startsWith("root.") ? host : `root.${host}`;
-  const candidates = [
-    `https://${rootHost}`,
-    `http://${rootHost}`,
-    `http://${rootHost}:${String(guessPort)}`,
-    exact,
-  ];
-  return [...new Set(candidates)];
+  const origin = `https://${rootHost}`;
+  return httpsPort === 443 ? [origin] : [origin, `${origin}:${String(httpsPort)}`];
 }
 
 export function defaultOwner(): string {
@@ -231,6 +259,11 @@ async function call<T = PeersResponse>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  try {
+    requireSecureControlRoot(cfg.root);
+  } catch (err) {
+    throw new PeerApiError((err as Error).message);
+  }
   const url = `${cfg.root}/_dev-proxy/${path}`;
   const headers = {
     ...(cfg.token !== undefined ? { Authorization: `Bearer ${cfg.token}` } : {}),
@@ -246,6 +279,7 @@ async function call<T = PeersResponse>(
             method,
             headers,
             body: payload,
+            redirect: "error",
             signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
           });
   } catch (err) {

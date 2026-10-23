@@ -1,14 +1,26 @@
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
-import { EventEmitter } from "node:events";
-import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { EventEmitter, once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
+import { PassThrough } from "node:stream";
+import {
+  describe,
+  expect,
+  it,
+  vi,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ProxyEvents, ProxyRequestEvent, ProxyWsEvent } from "./types.js";
-import { __testing } from "./server.js";
+import type { UpstreamTimeouts } from "./config.js";
+import { __testing, destroyAgents } from "./server.js";
 
 const {
   escapeHtml,
@@ -26,6 +38,350 @@ const {
 } = __testing;
 
 const WS_CLOSE_DELAY_MS = 50;
+
+describe("upstream terminal event ordering", () => {
+  function setup() {
+    const socket = new net.Socket();
+    const req = new http.IncomingMessage(socket);
+    req.headers.host = "web.test.dev";
+    req.method = "GET";
+    req.url = "/";
+    const res = new http.ServerResponse(req);
+    const upstream = new PassThrough();
+    const response = new http.IncomingMessage(new net.Socket());
+    response.statusCode = 200;
+    let respond: (message: http.IncomingMessage) => void = () => undefined;
+    vi.spyOn(http, "request").mockImplementation((...args: unknown[]) => {
+      respond = args.at(-1) as typeof respond;
+      return upstream as unknown as http.ClientRequest;
+    });
+    mockGetTarget.mockReturnValue({
+      url: new URL("http://localhost:4000"),
+      worktree: null,
+    });
+    mockIsDetailActive.mockReturnValue(false);
+    const emitter = new EventEmitter<ProxyEvents>();
+    const errors: ProxyRequestEvent[] = [];
+    emitter.on("request:error", (event) => errors.push(event));
+    createRequestHandler(emitter, "http", () => false)(req, res);
+    return { req, res, upstream, response, errors, respond };
+  }
+
+  it("discards headers arriving after cancellation and settles only once", () => {
+    const f = setup();
+    f.res.destroy();
+    f.res.emit("close");
+    f.respond(f.response);
+    // A queued socket and finish notification may arrive after cancellation.
+    f.upstream.emit("socket", new net.Socket());
+    f.upstream.emit("finish");
+    expect(f.response.destroyed).toBe(true);
+    expect(f.upstream.destroyed).toBe(true);
+    expect(f.errors).toHaveLength(1);
+    expect(f.errors[0]?.error).toBe("client disconnected");
+    f.req.destroy();
+  });
+
+  it.each(["request", "response"])(
+    "aborts an interrupted response on an upstream %s error without rewriting headers",
+    (source) => {
+      const f = setup();
+      f.respond(f.response);
+      f.upstream.emit("finish");
+      const writeHead = vi.spyOn(f.res, "writeHead");
+      const error = new Error("upstream stream interrupted");
+      (source === "request" ? f.upstream : f.response).emit("error", error);
+      // Ending would frame the truncated body as complete.
+      expect(f.res.destroyed).toBe(true);
+      expect(f.res.writableEnded).toBe(false);
+      expect(writeHead).not.toHaveBeenCalled();
+      expect(f.errors).toHaveLength(1);
+      expect(f.errors[0]?.error).toBe(error.message);
+      f.upstream.emit("error", error);
+      expect(f.errors).toHaveLength(1);
+      f.response.destroy();
+      f.upstream.destroy();
+      f.req.destroy();
+    },
+  );
+
+  it("survives repeated client response errors", () => {
+    const f = setup();
+    f.respond(f.response);
+    // ServerResponse emits one error per write after end().
+    f.res.emit("error", new Error("write after end"));
+    expect(() => f.res.emit("error", new Error("write after end"))).not.toThrow();
+    expect(f.errors).toHaveLength(1);
+    f.response.destroy();
+    f.upstream.destroy();
+    f.req.destroy();
+  });
+
+  it("does not end an already-ended client response again on a late upstream error", () => {
+    const f = setup();
+    f.respond(f.response);
+    f.res.end();
+    const end = vi.spyOn(f.res, "end");
+    f.upstream.emit("error", new Error("late upstream failure"));
+    expect(end).not.toHaveBeenCalled();
+    expect(f.errors).toHaveLength(1);
+    f.response.destroy();
+    f.upstream.destroy();
+    f.req.destroy();
+  });
+});
+
+describe("upstream request lifecycle", () => {
+  const servers: net.Server[] = [];
+  const sockets = new Set<net.Socket>();
+  const clients: http.ClientRequest[] = [];
+
+  async function listen(server: net.Server): Promise<number> {
+    servers.push(server);
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    return (server.address() as AddressInfo).port;
+  }
+
+  function request(port: number, path = "/", method = "GET"): http.ClientRequest {
+    const req = http.request({ hostname: "127.0.0.1", port, path, method, agent: false });
+    req.on("error", () => undefined);
+    clients.push(req);
+    return req;
+  }
+
+  async function startProxy(target: string, timeouts?: UpstreamTimeouts) {
+    mockGetTarget.mockReturnValue({ url: new URL(target), worktree: null });
+    mockIsDetailActive.mockReturnValue(false);
+    return listen(
+      http.createServer(
+        createRequestHandler(
+          new EventEmitter<ProxyEvents>(),
+          "http",
+          () => false,
+          timeouts,
+        ),
+      ),
+    );
+  }
+
+  afterEach(async () => {
+    for (const req of clients.splice(0)) req.destroy();
+    destroyAgents();
+    for (const socket of sockets) socket.destroy();
+    sockets.clear();
+    await Promise.all(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.close(() => {
+              resolve();
+            });
+          }),
+      ),
+    );
+  });
+
+  it("releases all 64 pooled connections when clients leave before response headers", async () => {
+    let waiting = 0;
+    const arrivals = new EventEmitter();
+    const allWaiting = once(arrivals, "ready");
+    const target = http.createServer((req, res) => {
+      if (req.url === "/wait") {
+        if (++waiting === 64) arrivals.emit("ready");
+      } else res.end("healthy");
+    });
+    const targetPort = await listen(target);
+    const proxyPort = await startProxy(`http://127.0.0.1:${targetPort}`);
+    for (let i = 0; i < 64; i++) request(proxyPort, "/wait").end();
+    await allWaiting;
+    for (const req of clients) req.destroy();
+    await vi.waitFor(
+      async () => {
+        const active = await new Promise<number>((resolve, reject) => {
+          target.getConnections((error, count) => {
+            if (error) reject(error);
+            else resolve(count);
+          });
+        });
+        expect(active).toBe(0);
+      },
+      { timeout: 5000 },
+    );
+    const res = await fetch(`http://127.0.0.1:${proxyPort}/healthy`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(await res.text()).toBe("healthy");
+  }, 15_000);
+
+  it("returns 504 when an upstream never sends response headers", async () => {
+    const port = await listen(http.createServer((req) => req.resume()));
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`, {
+      connectMs: 1000,
+      responseHeadersMs: 50,
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(504);
+    expect(await res.text()).toContain("timed out");
+  });
+
+  it("returns 504 while queued behind a streaming response without waiting for a socket", async () => {
+    let arrived = 0;
+    const port = await listen(
+      http.createServer((_req, res) => {
+        arrived++;
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write("data: connected\n\n");
+      }),
+    );
+    const target = `http://127.0.0.1:${port}`;
+    const agent = requestTransport(new URL(target)).agent;
+    const maxSockets = agent.maxSockets;
+    agent.maxSockets = 1;
+    try {
+      const proxyPort = await startProxy(target, {
+        connectMs: 500,
+        responseHeadersMs: 1000,
+      });
+      const first = request(proxyPort);
+      const firstResponse = once(first, "response");
+      first.end();
+      const [stream] = (await firstResponse) as [http.IncomingMessage];
+      stream.resume();
+      expect(stream.statusCode).toBe(200);
+
+      const res = await fetch(`http://127.0.0.1:${proxyPort}/queued`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      expect(res.status).toBe(504);
+      expect(await res.text()).toContain("connection timed out");
+      expect(arrived).toBe(1);
+      expect(stream.complete).toBe(false);
+    } finally {
+      agent.maxSockets = maxSockets;
+    }
+  });
+
+  it("bounds a stalled TLS handshake separately from response headers", async () => {
+    const port = await listen(
+      net.createServer((socket) => socket.on("data", () => undefined)),
+    );
+    const proxyPort = await startProxy(`https://127.0.0.1:${port}`, {
+      connectMs: 50,
+      responseHeadersMs: 1000,
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(504);
+    await res.text();
+  });
+
+  it("does not apply the response-header timeout to a slow request upload", async () => {
+    const port = await listen(
+      http.createServer((req, res) => {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => res.end(body));
+      }),
+    );
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`, {
+      connectMs: 1000,
+      responseHeadersMs: 30,
+    });
+    const req = request(proxyPort, "/", "POST");
+    const response = once(req, "response");
+    req.write("first");
+    await delay(80);
+    req.end("second");
+    const [res] = (await response) as [http.IncomingMessage];
+    let body = "";
+    for await (const chunk of res) body += String(chunk);
+    expect(res.statusCode).toBe(200);
+    expect(body).toBe("firstsecond");
+  });
+
+  it("resets the client connection when the upstream dies mid-body", async () => {
+    let upstream: http.ServerResponse | undefined;
+    const port = await listen(
+      http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/javascript" });
+        res.write("partial");
+        upstream = res;
+      }),
+    );
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`);
+    const req = request(proxyPort);
+    const response = once(req, "response");
+    req.end();
+    const [res] = (await response) as [http.IncomingMessage];
+    const [chunk] = (await once(res, "data")) as [Buffer];
+    expect(String(chunk)).toBe("partial");
+    // Not once(): it rejects on the "aborted" error the client is expected to see.
+    const closed = new Promise((resolve) => res.once("close", resolve));
+    res.on("error", () => undefined);
+    upstream?.socket?.destroy();
+    await closed;
+    // A cleanly ended chunked response would let the browser use a truncated asset.
+    expect(res.complete).toBe(false);
+  });
+
+  it("bounds a stalled upstream TLS handshake on a WebSocket upgrade", async () => {
+    const port = await listen(
+      net.createServer((socket) => socket.on("data", () => undefined)),
+    );
+    mockGetTarget.mockReturnValue({
+      url: new URL(`https://127.0.0.1:${port}`),
+      worktree: null,
+    });
+    const emitter = new EventEmitter<ProxyEvents>();
+    const settled = new Promise<ProxyWsEvent>((resolve) => {
+      emitter.on("ws", (event) => {
+        if (event.status !== "open") resolve(event);
+      });
+    });
+    const proxy = http.createServer();
+    proxy.on(
+      "upgrade",
+      createUpgradeHandler(emitter, "http", { connectMs: 50, responseHeadersMs: null }),
+    );
+    const req = request(await listen(proxy));
+    req.setHeader("Connection", "Upgrade");
+    req.setHeader("Upgrade", "websocket");
+    req.end();
+    expect(await settled).toMatchObject({
+      status: "error",
+      error: "upstream connection timed out",
+    });
+  });
+
+  it("keeps streaming responses alive after receiving their headers", async () => {
+    const port = await listen(
+      http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write("data: first\n\n");
+        setTimeout(() => res.end("data: second\n\n"), 80);
+      }),
+    );
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`, {
+      connectMs: 1000,
+      responseHeadersMs: 30,
+    });
+    const res = await fetch(`http://127.0.0.1:${proxyPort}`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("data: first\n\ndata: second\n\n");
+  });
+});
 
 /**
  * Promise-based event capture — eliminates setTimeout race conditions.
@@ -73,6 +429,7 @@ vi.mock("./routes.js", () => ({
   HTTPS_PORT: 0,
   CERT_PATH: undefined,
   KEY_PATH: undefined,
+  UPSTREAM_TIMEOUTS: { connectMs: 10_000, responseHeadersMs: 60_000 },
 }));
 
 const mockIsDetailActive = vi.fn<() => boolean>();

@@ -12,6 +12,7 @@ import {
   claim,
   defaultOwner,
   fetchPeers,
+  isExplicitRoot,
   PEER_CLIENT_PATH,
   PeerApiError,
   release,
@@ -148,15 +149,15 @@ async function join(args: ParsedArgs): Promise<void> {
   if (!hostArg) {
     fail(
       "root is required",
-      "e.g. dev-proxy peer join example.dev (the root's dev domain) or 192.168.1.10",
+      "e.g. dev-proxy peer join example.dev (the root's dev domain) or https://root.example.dev:3443",
     );
   }
-  const candidates = rootCandidates(hostArg, config.port);
+  const candidates = rootCandidates(hostArg, config.port, config.httpsPort);
   if (candidates.length === 0) fail(`invalid root "${hostArg}"`);
 
   const token = flagString(args.flags, "token");
   const outcome = token
-    ? await joinWithToken(candidates, token)
+    ? await joinWithToken(candidates, token, { explicit: isExplicitRoot(hostArg) })
     : await joinByPairing(
         candidates,
         flagString(args.flags, "name") ?? defaultOwner(),
