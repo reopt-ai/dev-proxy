@@ -156,36 +156,39 @@ function requestTransport(target: URL): {
     : { request: http.request, agent: httpAgent };
 }
 
-function connectToTarget(
+function connectToTarget(target: URL, onConnect: () => void): net.Socket | tls.TLSSocket {
+  const port = targetPort(target);
+  if (normalizeTargetProtocol(target.protocol) === "https:") {
+    return tls.connect(
+      {
+        host: target.hostname,
+        port,
+        servername: target.hostname,
+        rejectUnauthorized: false,
+      },
+      onConnect,
+    );
+  }
+  return net.connect(port, target.hostname, onConnect);
+}
+
+/** Same budget as the HTTP path: TCP connect and the TLS handshake together. */
+function connectWithDeadline(
   target: URL,
   connectMs: number | null,
   onConnect: () => void,
 ): net.Socket | tls.TLSSocket {
-  const port = targetPort(target);
-  const socket =
-    normalizeTargetProtocol(target.protocol) === "https:"
-      ? tls.connect(
-          {
-            host: target.hostname,
-            port,
-            servername: target.hostname,
-            rejectUnauthorized: false,
-          },
-          onConnect,
-        )
-      : net.connect(port, target.hostname, onConnect);
-  if (connectMs !== null) {
-    // Same budget as the HTTP path: TCP connect and the TLS handshake together.
-    const deadline = setTimeout(() => {
-      socket.destroy(new Error("upstream connection timed out"));
-    }, connectMs);
-    deadline.unref();
-    const clear = () => {
-      clearTimeout(deadline);
-    };
-    socket.once(socket instanceof tls.TLSSocket ? "secureConnect" : "connect", clear);
-    socket.once("close", clear);
-  }
+  const socket = connectToTarget(target, onConnect);
+  if (connectMs === null) return socket;
+  const deadline = setTimeout(() => {
+    socket.destroy(new Error("upstream connection timed out"));
+  }, connectMs);
+  deadline.unref();
+  const clear = () => {
+    clearTimeout(deadline);
+  };
+  socket.once(socket instanceof tls.TLSSocket ? "secureConnect" : "connect", clear);
+  socket.once("close", clear);
   return socket;
 }
 
@@ -454,7 +457,7 @@ function createUpgradeHandler(
       return;
     }
 
-    const proxySocket = connectToTarget(target, timeouts.connectMs, () => {
+    const proxySocket = connectWithDeadline(target, timeouts.connectMs, () => {
       const reqHeaders = [`${clientReq.method} ${clientReq.url} HTTP/1.1`];
       for (const [key, value] of Object.entries(clientReq.headers)) {
         if (
