@@ -50,6 +50,8 @@ export interface RouteSnapshot {
 
 const parsedRoutes = new Map<string, URL>();
 let wildcardTarget: URL | null = null;
+/** `config.domain` as Host headers are compared: lower case, no DNS trailing dot. */
+let trustedDomain = "";
 let snapshot: RouteSnapshot = {
   domain: "",
   routes: {},
@@ -81,6 +83,7 @@ function buildSnapshot(): RouteSnapshot {
 function buildRoutes(): void {
   parsedRoutes.clear();
   wildcardTarget = null;
+  trustedDomain = config.domain.replace(/\.$/, "").toLowerCase();
 
   for (const project of config.projects) {
     for (const [subdomain, target] of Object.entries(project.routes)) {
@@ -118,6 +121,7 @@ export const PROXY_PORT = config.port;
 export const HTTPS_PORT = config.httpsPort;
 export const CERT_PATH = config.certPath;
 export const KEY_PATH = config.keyPath;
+export const UPSTREAM_TIMEOUTS = config.timeouts;
 
 /** `http://*.<domain>:<port>` to show people — https without a port suffix when HTTP is off. */
 export function exampleOrigin(): string {
@@ -152,13 +156,17 @@ export interface TargetResult {
   peer: string | null;
 }
 
-export function parseHost(host: string): {
-  app: string;
-  worktree: string | null;
-} {
-  // Strip port number before parsing (HTTP Host header may include :port)
-  const hostOnly = host.replace(/:\d+$/, "").replace(/\.$/, "").toLowerCase();
-  const subdomain = hostOnly.split(".")[0] ?? hostOnly;
+/** Lower-case hostname of a Host header without port or DNS trailing dot; null if malformed. */
+function hostnameOf(host: string): string | null {
+  const match = /^([a-z0-9.-]+)(?::([0-9]{1,5}))?$/i.exec(host);
+  if (!match?.[1]) return null;
+  const port = match[2] === undefined ? null : Number(match[2]);
+  if (port !== null && (port < 1 || port > 65535)) return null;
+  return match[1].replace(/\.$/, "").toLowerCase();
+}
+
+function splitHostname(hostname: string): { app: string; worktree: string | null } {
+  const subdomain = hostname.split(".")[0] ?? hostname;
   const delimIdx = subdomain.indexOf("--");
   if (delimIdx !== -1) {
     return {
@@ -167,26 +175,30 @@ export function parseHost(host: string): {
     };
   }
   // Bare/apex domain (host equals the configured domain) gets its own key.
-  if (hostOnly === config.domain.replace(/\.$/, "").toLowerCase()) {
+  if (hostname === trustedDomain) {
     return { app: APEX_KEY, worktree: null };
   }
   return { app: subdomain, worktree: null };
 }
 
+export function parseHost(host: string): {
+  app: string;
+  worktree: string | null;
+} {
+  return splitHostname(hostnameOf(host) ?? "");
+}
+
 export function getTarget(host: string): TargetResult {
   // A matching first label alone is not authority to reach a local service:
   // an attacker controls the DNS for e.g. `api.attacker.example`.
-  const match = /^([a-z0-9.-]+)(?::([0-9]{1,5}))?$/i.exec(host);
-  const hostname = match?.[1]?.replace(/\.$/, "").toLowerCase();
-  const domain = config.domain.replace(/\.$/, "").toLowerCase();
+  const hostname = hostnameOf(host);
   if (
     !hostname ||
-    (match?.[2] !== undefined && (Number(match[2]) < 1 || Number(match[2]) > 65535)) ||
-    (hostname !== domain && !hostname.endsWith(`.${domain}`))
+    (hostname !== trustedDomain && !hostname.endsWith(`.${trustedDomain}`))
   ) {
     return { url: null, worktree: null, peer: null };
   }
-  const { app, worktree } = parseHost(host);
+  const { app, worktree } = splitHostname(hostname);
   if (worktree) {
     const target = getWorktreeTarget(worktree, app);
     return { url: target, worktree, peer: null };

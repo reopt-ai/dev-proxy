@@ -135,6 +135,7 @@ sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v node)")"
 Optional keys:
 
 - `certPath` / `keyPath` — use your own certificate instead of the mkcert default (relative paths resolve from `~/.dev-proxy/`). See [Access from other devices](#access-from-other-devices).
+- `timeouts` — upstream deadlines in seconds, `{ "connect": 10, "responseHeaders": 60 }` by default. `false` turns one off. Raise `responseHeaders` for cold compiles or long-poll endpoints that hold headers longer. Read at startup.
 
 ### Project Routes (`dev-proxy.config.mjs`)
 
@@ -163,7 +164,7 @@ export default {
 
 JS configs are evaluated in a fresh Worker on every load, including their relative imports, and the Worker is then terminated. Export plain data in `routes` and `worktreeConfig`; configuration evaluation must finish within 10 seconds. Module globals and process changes do not persist between reloads.
 
-HTTP upstream requests have a 10-second queue/connection/TLS deadline and a 60-second response-header deadline after the request body is sent. Client disconnects release the upstream connection immediately. Upload time is not counted toward the header deadline, and responses such as SSE have no overall duration limit.
+HTTP upstream requests have a queue/connection/TLS deadline (10 seconds) and a response-header deadline after the request body is sent (60 seconds); both are set by `timeouts`. WebSocket upgrades share the connection deadline. Client disconnects release the upstream connection immediately. Upload time is not counted toward the header deadline, and responses such as SSE have no overall duration limit. If the upstream fails after the response has started, the client connection is reset, so a truncated body is never mistaken for a complete one.
 
 ### Migrating from `.dev-proxy.json`
 

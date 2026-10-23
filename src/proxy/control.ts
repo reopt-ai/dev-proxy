@@ -10,7 +10,7 @@ import {
   type PeerEntry,
 } from "./peers.js";
 import { deviceIdForToken, pairCode, pairingStatus, requestPairing } from "./pairing.js";
-import { isLoopbackAddress } from "./network.js";
+import { isLoopbackAddress, plainAddress } from "./network.js";
 
 /**
  * Control API served by the root proxy under `/_dev-proxy/`.
@@ -32,11 +32,6 @@ const MAX_BODY_BYTES = 4096;
 
 export function isControlPath(url: string | undefined): boolean {
   return url?.startsWith(CONTROL_PREFIX) === true;
-}
-
-/** Drop the IPv4-mapped IPv6 prefix so addresses read and compare as IPv4. */
-function plainAddress(address: string): string {
-  return address.startsWith("::ffff:") ? address.slice(7) : address;
 }
 
 /** Loopback, RFC 1918, link-local and CGNAT ranges — the only callers we accept. */

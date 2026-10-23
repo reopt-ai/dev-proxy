@@ -21,6 +21,8 @@ interface RawGlobalConfig {
   httpsPort?: number;
   certPath?: string;
   keyPath?: string;
+  /** Upstream deadlines in seconds; `false` disables one. */
+  timeouts?: { connect?: number | false; responseHeaders?: number | false };
   projects?: string[];
 }
 
@@ -49,6 +51,13 @@ export interface ProjectConfig {
   worktreeConfig?: unknown;
 }
 
+export interface UpstreamTimeouts {
+  /** Agent queue, TCP connect and TLS handshake; `null` waits forever. */
+  connectMs: number | null;
+  /** From the end of the request upload to response headers; `null` waits forever. */
+  responseHeadersMs: number | null;
+}
+
 export interface ResolvedConfig {
   domain: string;
   /** `null` when the HTTP listener is turned off. */
@@ -56,6 +65,7 @@ export interface ResolvedConfig {
   httpsPort: number;
   certPath?: string;
   keyPath?: string;
+  timeouts: UpstreamTimeouts;
   projects: ProjectConfig[];
 }
 
@@ -98,6 +108,23 @@ function parseOptionalPort(label: string, raw: unknown, fallback: number): numbe
   return parsePort(label, raw, fallback);
 }
 
+/** Seconds in the file, milliseconds in memory; `false` means "no deadline". */
+function parseTimeout(
+  label: string,
+  raw: unknown,
+  fallbackSeconds: number,
+): number | null {
+  if (raw === false) return null;
+  if (raw === undefined) return fallbackSeconds * 1000;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.round(raw * 1000);
+  }
+  console.error(
+    `[dev-proxy] Ignoring ${label}: expected seconds or false, received ${JSON.stringify(raw)}`,
+  );
+  return fallbackSeconds * 1000;
+}
+
 // ── Config file resolution ──────────────────────────────────
 
 interface ConfigResolution {
@@ -123,10 +150,12 @@ const CONFIG_WORKER = new URL(
   try {
     const mod = await import(workerData);
     const config = mod.default ?? mod;
-    parentPort.postMessage({ ok: true, config: {
+    // Structured clone rejects URLs and functions that an in-process import
+    // accepted; JSON turns a URL into its href and drops what cannot cross.
+    parentPort.postMessage({ ok: true, config: JSON.parse(JSON.stringify({
       routes: config.routes,
       worktreeConfig: config.worktreeConfig,
-    } });
+    })) });
   } catch (error) {
     parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
   }
@@ -234,38 +263,56 @@ async function loadConfig(): Promise<ResolvedConfig> {
   const httpsPort = parsePort("httpsPort", global.httpsPort, 3443);
   const certPath = resolveFilePath(global.certPath, GLOBAL_CONFIG_PATH);
   const keyPath = resolveFilePath(global.keyPath, GLOBAL_CONFIG_PATH);
+  const timeouts: UpstreamTimeouts = {
+    connectMs: parseTimeout("timeouts.connect", global.timeouts?.connect, 10),
+    responseHeadersMs: parseTimeout(
+      "timeouts.responseHeaders",
+      global.timeouts?.responseHeaders,
+      60,
+    ),
+  };
 
+  const dirs = (global.projects ?? []).map((projectDir) =>
+    isAbsolute(projectDir) ? projectDir : resolve(CONFIG_DIR, projectDir),
+  );
+  // Each JS config pays for a Worker; evaluate them concurrently. Order is kept
+  // because the first project to register a subdomain wins.
+  const loaded = await Promise.all(dirs.map((dir) => loadProjectConfig(dir)));
   const projects: ProjectConfig[] = [];
-  if (global.projects) {
-    for (const projectDir of global.projects) {
-      const resolved = isAbsolute(projectDir)
-        ? projectDir
-        : resolve(CONFIG_DIR, projectDir);
-      const project = await loadProjectConfig(resolved);
-      if (project) {
-        projects.push(project);
-      } else {
-        console.error(
-          `[dev-proxy] Project ${resolved}: no config found (tried ${JS_CONFIG_NAMES.join(", ")}, ${PROJECT_CONFIG_NAME}, ${PROJECT_WORKTREES_NAME})`,
-        );
-      }
+  dirs.forEach((dir, i) => {
+    const project = loaded[i];
+    if (project) {
+      projects.push(project);
+    } else {
+      console.error(
+        `[dev-proxy] Project ${dir}: no config found (tried ${JS_CONFIG_NAMES.join(", ")}, ${PROJECT_CONFIG_NAME}, ${PROJECT_WORKTREES_NAME})`,
+      );
     }
-  }
+  });
 
-  return { domain, port, httpsPort, certPath, keyPath, projects };
+  return { domain, port, httpsPort, certPath, keyPath, timeouts, projects };
 }
 
 export let config = await loadConfig();
 
-/** Re-read all config files and replace the live config singleton. */
+let reloadGeneration = 0;
+
+/**
+ * Re-read all config files and replace the live config singleton. A save
+ * during a slow evaluation starts another reload; only the newest one may
+ * apply, or a stale result (e.g. a timed-out config) would win last.
+ */
 export async function reloadConfig(): Promise<ResolvedConfig> {
-  config = await loadConfig();
+  const generation = ++reloadGeneration;
+  const next = await loadConfig();
+  if (generation === reloadGeneration) config = next;
   return config;
 }
 
 export const __testing = {
   parsePort,
   parseOptionalPort,
+  parseTimeout,
   resolveFilePath,
   loadJson,
   loadWorktrees,

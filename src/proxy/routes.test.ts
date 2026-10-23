@@ -16,6 +16,7 @@ const mockConfig: ResolvedConfig = {
   domain: "test.dev",
   port: 3000,
   httpsPort: 3443,
+  timeouts: { connectMs: 10_000, responseHeadersMs: 60_000 },
   projects: [
     {
       path: "/projects/alpha",

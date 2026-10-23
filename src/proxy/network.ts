@@ -1,9 +1,20 @@
 import net from "node:net";
 
+/** Drop the IPv4-mapped IPv6 prefix so addresses read and compare as IPv4. */
+export function plainAddress(address: string): string {
+  return address.replace(/^::ffff:/i, "");
+}
+
+/** URL hostnames wrap IPv6 literals in brackets; socket addresses do not. */
+export function hostAddress(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "");
+}
+
 /** Literal loopback addresses only: DNS names are not a transport trust boundary. */
 export function isLoopbackAddress(address: string | undefined): boolean {
-  const ip = address?.toLowerCase().replace(/^::ffff:/, "");
-  return ip === "::1" || (ip !== undefined && net.isIPv4(ip) && ip.startsWith("127."));
+  if (address === undefined) return false;
+  const ip = plainAddress(address.toLowerCase());
+  return ip === "::1" || (net.isIPv4(ip) && ip.startsWith("127."));
 }
 
 /** Apply this before storing or using credentials, including legacy peer.json files. */
@@ -14,8 +25,10 @@ export function requireSecureControlRoot(root: string): void {
       "root must be an origin without credentials, path, query or fragment",
     );
   }
-  const ip = url.hostname.replace(/^\[|\]$/g, "");
-  if (url.protocol === "https:" || (url.protocol === "http:" && isLoopbackAddress(ip))) {
+  if (
+    url.protocol === "https:" ||
+    (url.protocol === "http:" && isLoopbackAddress(hostAddress(url.hostname)))
+  ) {
     return;
   }
   throw new Error(

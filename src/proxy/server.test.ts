@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ProxyEvents, ProxyRequestEvent, ProxyWsEvent } from "./types.js";
+import type { UpstreamTimeouts } from "./config.js";
 import { __testing, destroyAgents } from "./server.js";
 
 const {
@@ -82,7 +83,7 @@ describe("upstream terminal event ordering", () => {
   });
 
   it.each(["request", "response"])(
-    "ends an interrupted response on an upstream %s error without rewriting headers",
+    "aborts an interrupted response on an upstream %s error without rewriting headers",
     (source) => {
       const f = setup();
       f.respond(f.response);
@@ -90,7 +91,9 @@ describe("upstream terminal event ordering", () => {
       const writeHead = vi.spyOn(f.res, "writeHead");
       const error = new Error("upstream stream interrupted");
       (source === "request" ? f.upstream : f.response).emit("error", error);
-      expect(f.res.writableEnded).toBe(true);
+      // Ending would frame the truncated body as complete.
+      expect(f.res.destroyed).toBe(true);
+      expect(f.res.writableEnded).toBe(false);
       expect(writeHead).not.toHaveBeenCalled();
       expect(f.errors).toHaveLength(1);
       expect(f.errors[0]?.error).toBe(error.message);
@@ -101,6 +104,18 @@ describe("upstream terminal event ordering", () => {
       f.req.destroy();
     },
   );
+
+  it("survives repeated client response errors", () => {
+    const f = setup();
+    f.respond(f.response);
+    // ServerResponse emits one error per write after end().
+    f.res.emit("error", new Error("write after end"));
+    expect(() => f.res.emit("error", new Error("write after end"))).not.toThrow();
+    expect(f.errors).toHaveLength(1);
+    f.response.destroy();
+    f.upstream.destroy();
+    f.req.destroy();
+  });
 
   it("does not end an already-ended client response again on a late upstream error", () => {
     const f = setup();
@@ -139,10 +154,7 @@ describe("upstream request lifecycle", () => {
     return req;
   }
 
-  async function startProxy(
-    target: string,
-    timeouts?: { connectMs: number; responseHeadersMs: number },
-  ) {
+  async function startProxy(target: string, timeouts?: UpstreamTimeouts) {
     mockGetTarget.mockReturnValue({ url: new URL(target), worktree: null });
     mockIsDetailActive.mockReturnValue(false);
     return listen(
@@ -297,6 +309,60 @@ describe("upstream request lifecycle", () => {
     expect(body).toBe("firstsecond");
   });
 
+  it("resets the client connection when the upstream dies mid-body", async () => {
+    let upstream: http.ServerResponse | undefined;
+    const port = await listen(
+      http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/javascript" });
+        res.write("partial");
+        upstream = res;
+      }),
+    );
+    const proxyPort = await startProxy(`http://127.0.0.1:${port}`);
+    const req = request(proxyPort);
+    const response = once(req, "response");
+    req.end();
+    const [res] = (await response) as [http.IncomingMessage];
+    const [chunk] = (await once(res, "data")) as [Buffer];
+    expect(String(chunk)).toBe("partial");
+    // Not once(): it rejects on the "aborted" error the client is expected to see.
+    const closed = new Promise((resolve) => res.once("close", resolve));
+    res.on("error", () => undefined);
+    upstream?.socket?.destroy();
+    await closed;
+    // A cleanly ended chunked response would let the browser use a truncated asset.
+    expect(res.complete).toBe(false);
+  });
+
+  it("bounds a stalled upstream TLS handshake on a WebSocket upgrade", async () => {
+    const port = await listen(
+      net.createServer((socket) => socket.on("data", () => undefined)),
+    );
+    mockGetTarget.mockReturnValue({
+      url: new URL(`https://127.0.0.1:${port}`),
+      worktree: null,
+    });
+    const emitter = new EventEmitter<ProxyEvents>();
+    const settled = new Promise<ProxyWsEvent>((resolve) => {
+      emitter.on("ws", (event) => {
+        if (event.status !== "open") resolve(event);
+      });
+    });
+    const proxy = http.createServer();
+    proxy.on(
+      "upgrade",
+      createUpgradeHandler(emitter, "http", { connectMs: 50, responseHeadersMs: null }),
+    );
+    const req = request(await listen(proxy));
+    req.setHeader("Connection", "Upgrade");
+    req.setHeader("Upgrade", "websocket");
+    req.end();
+    expect(await settled).toMatchObject({
+      status: "error",
+      error: "upstream connection timed out",
+    });
+  });
+
   it("keeps streaming responses alive after receiving their headers", async () => {
     const port = await listen(
       http.createServer((_req, res) => {
@@ -363,6 +429,7 @@ vi.mock("./routes.js", () => ({
   HTTPS_PORT: 0,
   CERT_PATH: undefined,
   KEY_PATH: undefined,
+  UPSTREAM_TIMEOUTS: { connectMs: 10_000, responseHeadersMs: 60_000 },
 }));
 
 const mockIsDetailActive = vi.fn<() => boolean>();

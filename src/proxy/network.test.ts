@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { isLoopbackAddress, requireSecureControlRoot } from "./network.js";
+import {
+  hostAddress,
+  isLoopbackAddress,
+  plainAddress,
+  requireSecureControlRoot,
+} from "./network.js";
+
+describe("address normalization", () => {
+  it("reads IPv4-mapped IPv6 addresses as IPv4 regardless of case", () => {
+    expect(plainAddress("::ffff:10.0.0.1")).toBe("10.0.0.1");
+    expect(plainAddress("::FFFF:10.0.0.1")).toBe("10.0.0.1");
+    expect(plainAddress("fd12::1")).toBe("fd12::1");
+  });
+
+  it("unwraps bracketed URL hostnames", () => {
+    expect(hostAddress("[::1]")).toBe("::1");
+    expect(hostAddress("root.test.dev")).toBe("root.test.dev");
+  });
+});
 
 describe("control transport boundary", () => {
   it("allows only literal loopback addresses to bypass TLS", () => {
-    for (const address of ["127.0.0.1", "127.12.34.56", "::1", "::ffff:127.0.0.1"]) {
+    for (const address of [
+      "127.0.0.1",
+      "127.12.34.56",
+      "::1",
+      "::ffff:127.0.0.1",
+      "::FFFF:127.0.0.1",
+    ]) {
       expect(isLoopbackAddress(address)).toBe(true);
     }
     for (const address of [

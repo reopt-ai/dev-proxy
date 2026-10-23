@@ -4,11 +4,19 @@ import fs from "node:fs";
 import net from "node:net";
 import tls from "node:tls";
 import { EventEmitter } from "node:events";
-import { getTarget, PROXY_PORT, HTTPS_PORT, CERT_PATH, KEY_PATH } from "./routes.js";
+import {
+  getTarget,
+  PROXY_PORT,
+  HTTPS_PORT,
+  CERT_PATH,
+  KEY_PATH,
+  UPSTREAM_TIMEOUTS,
+} from "./routes.js";
 import { resolveCerts } from "./certs.js";
 import { createControlHandler } from "./control.js";
 import { ensurePeerToken } from "./peers.js";
 import type { ProxyEvents, ProxyRequestEvent, ProxyWsEvent } from "./types.js";
+import type { UpstreamTimeouts } from "./config.js";
 import { isDetailActive } from "../store.js";
 
 // Keep-Alive agent — reuses TCP connections to target servers
@@ -148,31 +156,38 @@ function requestTransport(target: URL): {
     : { request: http.request, agent: httpAgent };
 }
 
-function connectToTarget(target: URL, onConnect: () => void): net.Socket | tls.TLSSocket {
+function connectToTarget(
+  target: URL,
+  connectMs: number | null,
+  onConnect: () => void,
+): net.Socket | tls.TLSSocket {
   const port = targetPort(target);
-  if (normalizeTargetProtocol(target.protocol) === "https:") {
-    return tls.connect(
-      {
-        host: target.hostname,
-        port,
-        servername: target.hostname,
-        rejectUnauthorized: false,
-      },
-      onConnect,
-    );
+  const socket =
+    normalizeTargetProtocol(target.protocol) === "https:"
+      ? tls.connect(
+          {
+            host: target.hostname,
+            port,
+            servername: target.hostname,
+            rejectUnauthorized: false,
+          },
+          onConnect,
+        )
+      : net.connect(port, target.hostname, onConnect);
+  if (connectMs !== null) {
+    // Same budget as the HTTP path: TCP connect and the TLS handshake together.
+    const deadline = setTimeout(() => {
+      socket.destroy(new Error("upstream connection timed out"));
+    }, connectMs);
+    deadline.unref();
+    const clear = () => {
+      clearTimeout(deadline);
+    };
+    socket.once(socket instanceof tls.TLSSocket ? "secureConnect" : "connect", clear);
+    socket.once("close", clear);
   }
-  return net.connect(port, target.hostname, onConnect);
+  return socket;
 }
-
-interface UpstreamTimeouts {
-  connectMs: number;
-  responseHeadersMs: number;
-}
-
-const UPSTREAM_TIMEOUTS: UpstreamTimeouts = {
-  connectMs: 10_000,
-  responseHeadersMs: 60_000,
-};
 
 function createRequestHandler(
   emitter: ProxyEmitter,
@@ -287,7 +302,9 @@ function createRequestHandler(
           clientRes.end(`Dev proxy: target not ready (${err.message})`);
         }
       } else if (!clientRes.writableEnded) {
-        clientRes.end();
+        // end() would frame a truncated body as complete (final chunk, or a
+        // client left waiting on Content-Length). Resetting signals the abort.
+        clientRes.destroy();
       }
     };
     const abortUpstream = (err: Error, status = 502) => {
@@ -351,11 +368,13 @@ function createRequestHandler(
       abortUpstream(new Error("client disconnected"));
     };
     clientRes.once("close", cancelUpstream);
-    clientRes.once("error", cancelUpstream);
+    // Not once(): each write after end() emits its own error, and a second one
+    // without a listener would crash the proxy.
+    clientRes.on("error", cancelUpstream);
 
     // Queue/connect/TLS time is bounded independently of upload time. After
     // headers arrive there is no deadline, so SSE and streamed downloads live on.
-    armDeadline(timeouts.connectMs, "connection");
+    if (timeouts.connectMs !== null) armDeadline(timeouts.connectMs, "connection");
     proxyReq.once("socket", (socket) => {
       const connected = () => {
         if (timeoutPhase === "connection") clearDeadline();
@@ -370,7 +389,7 @@ function createRequestHandler(
       }
     });
     proxyReq.once("finish", () => {
-      if (!settled && !upstreamResponse)
+      if (!settled && !upstreamResponse && timeouts.responseHeadersMs !== null)
         armDeadline(timeouts.responseHeadersMs, "response headers");
     });
 
@@ -383,6 +402,7 @@ function createRequestHandler(
 function createUpgradeHandler(
   emitter: ProxyEmitter,
   proto: "http" | "https",
+  timeouts: UpstreamTimeouts = UPSTREAM_TIMEOUTS,
 ): (clientReq: http.IncomingMessage, clientSocket: net.Socket, head: Buffer) => void {
   return (clientReq, clientSocket, head) => {
     const { url: target, worktree } = getTarget(clientReq.headers.host ?? "");
@@ -434,7 +454,7 @@ function createUpgradeHandler(
       return;
     }
 
-    const proxySocket = connectToTarget(target, () => {
+    const proxySocket = connectToTarget(target, timeouts.connectMs, () => {
       const reqHeaders = [`${clientReq.method} ${clientReq.url} HTTP/1.1`];
       for (const [key, value] of Object.entries(clientReq.headers)) {
         if (
