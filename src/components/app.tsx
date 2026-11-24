@@ -353,21 +353,24 @@ export function App({ httpsEnabled = false }: { httpsEnabled?: boolean }) {
   const [pairConfirmId, setPairConfirmId] = useState<string | null>(null);
   const pairConfirming = pairConfirmId !== null && pairConfirmId === pairRequest?.id;
 
+  // Ink 8 types stdout as a generic writable stream; the TUI only runs on a
+  // TTY, so narrow back to read the terminal dimensions.
   const { stdout } = useStdout();
+  const tty = stdout as NodeJS.WriteStream;
   const [termSize, setTermSize] = useState({
-    rows: stdout.rows,
-    cols: stdout.columns,
+    rows: tty.rows,
+    cols: tty.columns,
   });
 
   useEffect(() => {
     const handle = () => {
-      setTermSize({ rows: stdout.rows, cols: stdout.columns });
+      setTermSize({ rows: tty.rows, cols: tty.columns });
     };
-    stdout.on("resize", handle);
+    tty.on("resize", handle);
     return () => {
-      stdout.off("resize", handle);
+      tty.off("resize", handle);
     };
-  }, [stdout]);
+  }, [tty]);
 
   const resetDetailScroll = useCallback(() => {
     setDetailScroll(0);
